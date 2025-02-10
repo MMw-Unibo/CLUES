@@ -1,0 +1,4684 @@
+From 649dd214563db27fb290876f9612eaf1b4834cfc Mon Sep 17 00:00:00 2001
+From: Alessandro Aimi <alessandro.aimi@unibo.it>
+Date: Wed, 2 Oct 2024 16:38:01 +0200
+Subject: [PATCH] Apply lorawan module patch
+
+---
+ CMakeLists.txt                           |  20 ++
+ examples/CMakeLists.txt                  |   8 +
+ examples/clues.cc                        | 301 ++++++++++++++++++
+ helper/clues-helper.cc                   | 274 ++++++++++++++++
+ helper/clues-helper.h                    | 179 +++++++++++
+ helper/clues-tracker.cc                  | 380 +++++++++++++++++++++++
+ helper/clues-tracker.h                   | 307 ++++++++++++++++++
+ helper/lora-phy-helper.cc                |   8 +-
+ helper/lora-radio-energy-model-helper.cc |  20 +-
+ helper/periodic-sender-helper.cc         |  12 +-
+ helper/periodic-sender-helper.h          |  13 +-
+ helper/random-listener-helper.cc         |  74 +++++
+ helper/random-listener-helper.h          |  81 +++++
+ model/clues-header.cc                    | 115 +++++++
+ model/clues-header.h                     |  90 ++++++
+ model/clues-net-device.cc                | 235 ++++++++++++++
+ model/clues-net-device.h                 | 144 +++++++++
+ model/end-device-lora-phy.cc             |  41 +--
+ model/end-device-lora-phy.h              |  22 +-
+ model/gateway-lora-phy.cc                |  37 ++-
+ model/gateway-lora-phy.h                 |  20 +-
+ model/lora-application.cc                | 168 ++++++++++
+ model/lora-application.h                 | 122 ++++++++
+ model/lora-gateway-net-device.cc         |  73 +++++
+ model/lora-gateway-net-device.h          |  58 ++++
+ model/lora-phy.cc                        |  26 ++
+ model/lora-phy.h                         |  53 +++-
+ model/lora-radio-energy-model.cc         |   9 +-
+ model/lora-radio-energy-model.h          |   3 +-
+ model/lora-tx-current-model.cc           |  19 +-
+ model/lora-tx-current-model.h            |  13 +-
+ model/periodic-sender.cc                 | 109 +------
+ model/periodic-sender.h                  |  84 +----
+ model/random-listener.cc                 | 137 ++++++++
+ model/random-listener.h                  |  84 +++++
+ model/sensor-net-device.cc               | 136 ++++++++
+ model/sensor-net-device.h                | 119 +++++++
+ model/simple-end-device-lora-phy.cc      | 187 +++++------
+ model/simple-gateway-lora-phy.cc         |  90 +++---
+ 39 files changed, 3443 insertions(+), 428 deletions(-)
+ create mode 100644 examples/clues.cc
+ create mode 100644 helper/clues-helper.cc
+ create mode 100644 helper/clues-helper.h
+ create mode 100644 helper/clues-tracker.cc
+ create mode 100644 helper/clues-tracker.h
+ create mode 100644 helper/random-listener-helper.cc
+ create mode 100644 helper/random-listener-helper.h
+ create mode 100644 model/clues-header.cc
+ create mode 100644 model/clues-header.h
+ create mode 100644 model/clues-net-device.cc
+ create mode 100644 model/clues-net-device.h
+ create mode 100644 model/lora-application.cc
+ create mode 100644 model/lora-application.h
+ create mode 100644 model/lora-gateway-net-device.cc
+ create mode 100644 model/lora-gateway-net-device.h
+ create mode 100644 model/random-listener.cc
+ create mode 100644 model/random-listener.h
+ create mode 100644 model/sensor-net-device.cc
+ create mode 100644 model/sensor-net-device.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 767d9dd..640a61f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -37,6 +37,13 @@ set(source_files
+     model/lora-utils.cc
+     model/adr-component.cc
+     model/hex-grid-position-allocator.cc
++    model/clues-net-device.cc
++    model/clues-header.cc
++    model/lora-gateway-net-device.cc
++    model/sensor-net-device.cc
++    model/lora-application.cc
++    model/periodic-sender.cc
++    model/random-listener.cc
+     helper/lora-radio-energy-model-helper.cc
+     helper/lora-helper.cc
+     helper/lora-phy-helper.cc
+@@ -46,6 +53,9 @@ set(source_files
+     helper/forwarder-helper.cc
+     helper/network-server-helper.cc
+     helper/lora-packet-tracker.cc
++    helper/clues-helper.cc
++    helper/clues-tracker.cc
++    helper/random-listener-helper.cc
+ )
+ 
+ set(header_files
+@@ -87,6 +97,13 @@ set(header_files
+     model/lora-utils.h
+     model/adr-component.h
+     model/hex-grid-position-allocator.h
++    model/clues-net-device.h
++    model/clues-header.h
++    model/lora-gateway-net-device.h
++    model/sensor-net-device.h
++    model/lora-application.h
++    model/periodic-sender.h
++    model/random-listener.h
+     helper/lora-radio-energy-model-helper.h
+     helper/lora-helper.h
+     helper/lora-phy-helper.h
+@@ -96,6 +113,9 @@ set(header_files
+     helper/forwarder-helper.h
+     helper/network-server-helper.h
+     helper/lora-packet-tracker.h
++    helper/clues-helper.h
++    helper/clues-tracker.h
++    helper/random-listener-helper.h
+     test/utilities.h
+ )
+ 
+diff --git a/examples/CMakeLists.txt b/examples/CMakeLists.txt
+index bfe4424..542b110 100644
+--- a/examples/CMakeLists.txt
++++ b/examples/CMakeLists.txt
+@@ -60,3 +60,11 @@ build_lib_example(
+     ${libcore}
+     ${liblorawan}
+ )
++
++build_lib_example(
++  NAME clues
++  SOURCE_FILES clues.cc
++  LIBRARIES_TO_LINK
++    ${libcore}
++    ${liblorawan}
++)
+diff --git a/examples/clues.cc b/examples/clues.cc
+new file mode 100644
+index 0000000..3265007
+--- /dev/null
++++ b/examples/clues.cc
+@@ -0,0 +1,301 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "ns3/application-container.h"
++#include "ns3/basic-energy-source-helper.h"
++#include "ns3/clues-helper.h"
++#include "ns3/clues-tracker.h"
++#include "ns3/core-module.h"
++#include "ns3/lora-radio-energy-model-helper.h"
++#include "ns3/mobility-helper.h"
++#include "ns3/periodic-sender-helper.h"
++#include "ns3/random-listener-helper.h"
++
++using namespace ns3;
++using namespace lorawan;
++
++NS_LOG_COMPONENT_DEFINE("Clues");
++
++enum Scenario
++{
++    Classic,
++    FullRand,
++    SF7Single
++};
++
++const std::unordered_map<std::string, Scenario> scenarioMap = {
++    {"Classic", Classic},
++    {"FullRand", FullRand},
++    {"SF7Single", SF7Single},
++};
++
++/**
++ * Print initial configuration.
++ *
++ * \param nDevs Number of end devices.
++ * \param nGws Number of gateways.
++ * \param areaKm2 Simulation area [km^2].
++ * \param allocation Parameter allocation to devices.
++ * \param filename A string containing the path to the output file.
++ */
++void
++PrintConfigSetup(uint32_t nDevs,
++                 uint32_t nGws,
++                 double areaKm2,
++                 const CluesHelper::Allocation_t& allocation,
++                 std::string filename)
++
++{
++    std::stringstream ss;
++    ss << "Area: " << areaKm2 << " km^2, Density: " << nDevs / areaKm2 << " devs/km^2, "
++       << nGws / areaKm2 << " gws/km^2\n";
++    CluesTracker::PrintTxParamAllocationShares(allocation, filename, ss);
++    ss << "\nAll configurations terminated. Starting simulation...\n\n"
++       << "--------------------------------------------------------------------------------"
++       << std::endl;
++    std::cout << ss.str();
++}
++
++int
++main(int argc, char* argv[])
++{
++    /***************************
++     *  Simulation parameters  *
++     ***************************/
++
++    uint32_t simHours = 10;
++    double areaSideMeters = 9200;
++    uint32_t endDevNum = 500;
++    uint32_t gwNum = 50;
++    std::string scenarioStr = "SF7Single";
++
++    /* Expose parameters to command line */
++    {
++        CommandLine cmd(__FILE__);
++        cmd.AddValue("hoursNum", "Number of hours to simulate", simHours);
++        cmd.AddValue("sideLength", "Side length (meters) of the placement square", areaSideMeters);
++        cmd.AddValue("devNum", "Number of devices to simulate", endDevNum);
++        cmd.AddValue("gwNum", "Number of gateways to simulate", gwNum);
++        std::string pad = "\n                   ";
++        cmd.AddValue(
++            "scenario",
++            "All options deploy single-channel gateways except 'Classic'." + pad +
++                "* Classic: Deploy multi-channel gateways, devices use ADR & freq. hopping;" + pad +
++                "* FullRand: Gateways hop freq. and SF overtime, devices use random config;" + pad +
++                "* SF7Single: Single SF7 channel for everybody, no hopping.",
++            scenarioStr);
++        cmd.Parse(argc, argv);
++        NS_ASSERT((simHours > 0) && (endDevNum > 0));
++        NS_ASSERT((gwNum > 0) && (areaSideMeters > 0));
++        NS_ASSERT(scenarioMap.count(scenarioStr));
++    }
++
++    /* Apply global configurations */
++    Scenario scenario = scenarioMap.at(scenarioStr);
++    {
++    }
++
++    /* Logging options */
++    {
++        //!> Requirement: build ns3 with debug option
++        // LogComponentEnable("CluesHelper", LOG_LEVEL_DEBUG);
++        LogComponentEnableAll(LOG_PREFIX_FUNC);
++        LogComponentEnableAll(LOG_PREFIX_NODE);
++        LogComponentEnableAll(LOG_PREFIX_TIME);
++    }
++
++    /******************
++     *  Radio Channel *
++     ******************/
++
++    Ptr<LoraChannel> channel;
++    auto loss = CreateObject<LogDistancePropagationLossModel>();
++    auto shadowing = CreateObject<RandomPropagationLossModel>();
++    {
++        // Delay obtained from distance and speed of light in vacuum (constant)
++        Ptr<PropagationDelayModel> delay = CreateObject<ConstantSpeedPropagationDelayModel>();
++
++        // Path loss taken from experimental results in
++        // https://doi.org/10.1109/VTC2021-Fall52928.2021.9625531
++        double e = 1.58;
++        double l0 = 85.01;
++        double s = 9.9;
++
++        loss->SetPathLossExponent(e);
++        loss->SetReference(1, l0);
++        auto rand = "ns3::NormalRandomVariable[Variance=" + std::to_string(pow(s, 2)) + "]";
++        shadowing->SetAttribute("Variable", StringValue(rand));
++
++        channel = CreateObject<LoraChannel>(loss, delay);
++    }
++
++    /**************
++     *  Mobility  *
++     **************/
++
++    MobilityHelper mobilityGw;
++    MobilityHelper mobilityEd;
++    {
++        ObjectFactory sideRV("ns3::UniformRandomVariable", "Max", DoubleValue(areaSideMeters));
++        ObjectFactory hightRV("ns3::UniformRandomVariable");
++
++        // Gateway mobility
++        mobilityGw.SetMobilityModel("ns3::ConstantPositionMobilityModel");
++        hightRV.Set("Min", DoubleValue(10), "Max", DoubleValue(30));
++        mobilityGw.SetPositionAllocator("ns3::RandomBoxPositionAllocator",
++                                        "X",
++                                        PointerValue(sideRV.Create()),
++                                        "Y",
++                                        PointerValue(sideRV.Create()),
++                                        "Z",
++                                        PointerValue(hightRV.Create()));
++
++        // End Device mobility
++        mobilityEd.SetMobilityModel("ns3::ConstantPositionMobilityModel");
++        hightRV.Set("Min", DoubleValue(1), "Max", DoubleValue(5));
++        mobilityEd.SetPositionAllocator("ns3::RandomBoxPositionAllocator",
++                                        "X",
++                                        PointerValue(sideRV.Create()),
++                                        "Y",
++                                        PointerValue(sideRV.Create()),
++                                        "Z",
++                                        PointerValue(hightRV.Create()));
++    }
++
++    /******************
++     *  Create Nodes  *
++     ******************/
++
++    NodeContainer gatewayNodes;
++    NodeContainer endDeviceNodes;
++    {
++        gatewayNodes.Create(gwNum);
++        mobilityGw.Install(gatewayNodes);
++
++        endDeviceNodes.Create(endDevNum);
++        mobilityEd.Install(endDeviceNodes);
++    }
++
++    /************************
++     *  Create Net Devices  *
++     ************************/
++
++    NetDeviceContainer gatewayNetDevices;
++    NetDeviceContainer endDeviceNetDevices;
++    {
++        // Create the LoraNetDevices of the gateways
++        auto gwType =
++            (scenario == Classic) ? CluesHelper::ClassicGateway : CluesHelper::SingleChannelGateway;
++        gatewayNetDevices = CluesHelper::Install(gatewayNodes, channel, gwType);
++        // Create the CluesNetDevices of the end devices
++        endDeviceNetDevices = CluesHelper::Install(endDeviceNodes, channel, CluesHelper::Sensor);
++    }
++
++    /*************************
++     *  Create Applications  *
++     *************************/
++
++    {
++        // Install applications in EDs
++        PeriodicSenderHelper appHelper;
++        appHelper.SetPacketSize(243);
++        appHelper.SetPeriod(Minutes(20));
++        appHelper.Install(endDeviceNodes);
++
++        if (scenario == FullRand)
++        {
++            // Install gateway application for Rx freq/SF hopping
++            RandomListenerHelper appHelper;
++            appHelper.SetAttribute("MaxInterval", TimeValue(Minutes(10)));
++            appHelper.Install(gatewayNodes);
++        }
++    }
++
++    /************************
++     * Install Energy Model *
++     ************************/
++
++    {
++        // Configure and install energy source model on devices
++        BasicEnergySourceHelper basicSourceHelper;
++        basicSourceHelper.Set("BasicEnergySourceInitialEnergyJ",
++                              DoubleValue(118800)); // Energy in J of 10000 mAH battery
++        basicSourceHelper.Set("BasicEnergySupplyVoltageV", DoubleValue(3.3));
++        basicSourceHelper.Set("PeriodicEnergyUpdateInterval",
++                              TimeValue(Hours(5))); // Only update on demand
++        EnergySourceContainer sources = basicSourceHelper.Install(endDeviceNodes);
++
++        // Configure and install energy consumption model on devices
++        LoraRadioEnergyModelHelper radioEnergyHelper;
++        radioEnergyHelper.SetTxCurrentModel("ns3::LinearLoraTxCurrentModel");
++        radioEnergyHelper.Install(endDeviceNetDevices, sources);
++    }
++
++    /*************************************************
++     *  Parameter allocation, metrics and simulation *
++     *************************************************/
++
++    CluesHelper::Allocation_t alloc;
++    {
++        // Setup Rx/Tx parameters
++        switch (scenario)
++        {
++        case SF7Single:
++            CluesHelper::ConfigSingleSF7RxChannel(gatewayNetDevices);
++            alloc = CluesHelper::ConfigSingleSF7TxChannel(endDeviceNetDevices);
++            break;
++        case FullRand:
++            CluesHelper::ConfigRandomRxParams(gatewayNetDevices);
++            alloc = CluesHelper::ConfigRandomTxParams(endDeviceNetDevices);
++            break;
++        case Classic:
++            CluesHelper::ConfigAllRxFrequencies(gatewayNetDevices);
++            alloc =
++                CluesHelper::ConfigIdealTxParams(endDeviceNetDevices, gatewayNetDevices, channel);
++        }
++
++        // Add path loss variance
++        loss->SetNext(shadowing);
++    }
++
++    CluesTracker tracker;
++    tracker.ConnectUplinkPhyTraces(NetDeviceContainer(endDeviceNetDevices, gatewayNetDevices));
++    tracker.EnableSimulationTimePrinting(Hours((double)simHours / 10));
++    tracker.EnablePeriodicDataCleanup(Minutes(30));
++
++    PrintConfigSetup(endDevNum,
++                     gatewayNodes.GetN(),
++                     std::pow(areaSideMeters / 1000, 2),
++                     alloc,
++                     "allocation.csv");
++
++    // Start simulation
++    Simulator::Stop(Hours(simHours) + Seconds(10));
++    Simulator::Run();
++    std::cout << "--------------------------------------------------------------------------------"
++              << std::endl;
++
++    tracker.PrintTotalPacketOutcomes("outcomes.csv");
++    tracker.PrintTotalDuplicationStatistics("duplication.csv");
++    CluesTracker::PrintTotalDeviceEnergyConsumption("energy.csv", endDeviceNodes);
++
++    Simulator::Destroy();
++
++    return 0;
++}
+diff --git a/helper/clues-helper.cc b/helper/clues-helper.cc
+new file mode 100644
+index 0000000..f942e7d
+--- /dev/null
++++ b/helper/clues-helper.cc
+@@ -0,0 +1,274 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "clues-helper.h"
++
++#include "ns3/lora-gateway-net-device.h"
++#include "ns3/lora-phy-helper.h"
++#include "ns3/random-variable-stream.h"
++#include "ns3/sensor-net-device.h"
++
++#include <queue>
++
++namespace ns3
++{
++namespace lorawan
++{
++
++NS_LOG_COMPONENT_DEFINE("CluesHelper");
++
++NetDeviceContainer
++CluesHelper::Install(NodeContainer c, Ptr<LoraChannel> channel, DeviceType type)
++{
++    NS_LOG_FUNCTION(channel << type);
++    LoraPhyHelper ph;
++    ph.SetChannel(channel);
++    ph.SetDeviceType((type == ClassicGateway) ? LoraPhyHelper::GW : LoraPhyHelper::ED);
++    NetDeviceContainer devices;
++    for (auto i = c.Begin(); i != c.End(); ++i)
++    {
++        auto node = *i;
++        Ptr<CluesNetDevice> dev;
++        switch (type)
++        {
++        case Sensor:
++            dev = CreateObject<SensorNetDevice>();
++            break;
++        default:
++            dev = CreateObject<LoraGatewayNetDevice>();
++        }
++        dev->SetPhy(ph.Create(node, dev));
++        node->AddDevice(dev);
++        devices.Add(dev);
++        NS_LOG_DEBUG("node=" << (unsigned)node->GetId()
++                             << ", pos=" << node->GetObject<MobilityModel>()->GetPosition());
++    }
++    return devices;
++}
++
++NetDeviceContainer
++CluesHelper::Install(Ptr<Node> node, Ptr<LoraChannel> channel, DeviceType type)
++{
++    return Install(NodeContainer(node), channel, type);
++}
++
++void
++CluesHelper::ConfigRandomRxParams(const NetDeviceContainer& gateways)
++{
++    NS_LOG_FUNCTION_NOARGS();
++    auto rv = CreateObject<UniformRandomVariable>();
++    auto& freqs = CluesNetDevice::m_frequenciesMHz;
++    auto& sfs = CluesNetDevice::m_spreadingFactors;
++    for (auto i = gateways.Begin(); i != gateways.End(); ++i)
++    {
++        auto netdev = DynamicCast<LoraGatewayNetDevice>(*i);
++        NS_ASSERT(netdev);
++        auto phy = DynamicCast<SimpleEndDeviceLoraPhy>(netdev->GetPhy());
++        NS_ASSERT(phy);
++        size_t freqIdx = rv->GetInteger(0, freqs.size() - 1);
++        auto freq = freqs.at(freqIdx);
++        phy->SetFrequency(freq);
++        size_t sfIdx = rv->GetInteger(0, sfs.size() - 1);
++        auto sf = sfs.at(sfIdx);
++        phy->SetSpreadingFactor(sf);
++    }
++}
++
++void
++CluesHelper::ConfigAllRxFrequencies(const NetDeviceContainer& gateways)
++{
++    NS_LOG_FUNCTION_NOARGS();
++    auto& freqs = CluesNetDevice::m_frequenciesMHz;
++    for (auto i = gateways.Begin(); i != gateways.End(); ++i)
++    {
++        auto netdev = DynamicCast<LoraGatewayNetDevice>(*i);
++        NS_ASSERT(netdev);
++        auto phy = DynamicCast<SimpleGatewayLoraPhy>(netdev->GetPhy());
++        NS_ASSERT(phy);
++        for (const auto& f : freqs)
++        {
++            phy->AddFrequency(f);
++        }
++    }
++}
++
++void
++CluesHelper::ConfigSingleSF7RxChannel(const NetDeviceContainer& gateways)
++{
++    NS_LOG_FUNCTION_NOARGS();
++    const auto FREQ = CluesNetDevice::m_frequenciesMHz.at(0);
++    const uint8_t SF = 7;
++    for (auto i = gateways.Begin(); i != gateways.End(); ++i)
++    {
++        auto netdev = DynamicCast<LoraGatewayNetDevice>(*i);
++        NS_ASSERT(netdev);
++        auto phy = DynamicCast<SimpleEndDeviceLoraPhy>(netdev->GetPhy());
++        NS_ASSERT(phy);
++        phy->SetFrequency(FREQ);
++        phy->SetSpreadingFactor(SF);
++    }
++}
++
++CluesHelper::Allocation_t
++CluesHelper::ConfigIdealTxParams(const NetDeviceContainer& devices,
++                                 const NetDeviceContainer& gateways,
++                                 Ptr<const LoraChannel> channel)
++{
++    NS_LOG_FUNCTION_NOARGS();
++
++    // Validate gateway type
++    for (auto i = gateways.Begin(); i != gateways.End(); ++i)
++    {
++        auto netdev = DynamicCast<LoraGatewayNetDevice>(*i);
++        NS_ASSERT(netdev);
++        auto phy = DynamicCast<SimpleEndDeviceLoraPhy>(netdev->GetPhy());
++        NS_ASSERT(phy);
++    }
++
++    Allocation_t alloc;
++    for (auto i = devices.Begin(); i != devices.End(); ++i)
++    {
++        auto netdev = DynamicCast<SensorNetDevice>(*i);
++        NS_ASSERT(netdev);
++        auto position = netdev->GetNode()->GetObject<MobilityModel>();
++        NS_ASSERT(position);
++        NS_LOG_INFO("node=" << netdev->GetNode()->GetId());
++
++        const auto FREQ = CluesNetDevice::m_frequenciesMHz.at(0); // reference frequency
++
++        uint8_t sf = 12;
++        uint8_t txPower = 14;
++
++        NS_LOG_DEBUG("SF selection");
++        for (const auto s : CluesNetDevice::m_spreadingFactors)
++        {
++            if (s >= sf) // force always lower
++            {
++                continue;
++            }
++            if (GetMaxRxPowerReliableMargin(position, txPower, s, FREQ, gateways, channel) > 0)
++            {
++                NS_LOG_DEBUG("SF change: oldSF=" << (unsigned)sf << ", newSF=" << unsigned(s));
++                sf = s;
++            }
++        }
++
++        NS_LOG_DEBUG("TP minimization");
++        for (const auto tp : CluesNetDevice::m_powerValuesDBm)
++        {
++            if (tp >= txPower) // force always lower
++            {
++                continue;
++            }
++            if (GetMaxRxPowerReliableMargin(position, tp, sf, FREQ, gateways, channel) > 0)
++            {
++                NS_LOG_DEBUG("TP change: oldTP=" << (unsigned)txPower
++                                                 << ", newTP=" << unsigned(tp));
++                txPower = tp;
++            }
++        }
++
++        NS_LOG_DEBUG("SELECT: SF=" << unsigned(sf) << ", TP=" << (unsigned)txPower << "dBm");
++        netdev->SetSpreadingFactor(sf);
++        netdev->SetTxPower(txPower);
++        alloc[sf][txPower]++;
++    }
++    return alloc;
++}
++
++CluesHelper::Allocation_t
++CluesHelper::ConfigRandomTxParams(const NetDeviceContainer& devices)
++{
++    NS_LOG_FUNCTION_NOARGS();
++    const uint8_t TX_POWER = 14;
++    auto rv = CreateObject<UniformRandomVariable>();
++    auto& freqs = CluesNetDevice::m_frequenciesMHz;
++    auto& sfs = CluesNetDevice::m_spreadingFactors;
++    Allocation_t alloc;
++    for (auto i = devices.Begin(); i != devices.End(); ++i)
++    {
++        auto netdev = DynamicCast<SensorNetDevice>(*i);
++        NS_ASSERT(netdev);
++        netdev->SetTxPower(TX_POWER);
++        size_t sfIdx = rv->GetInteger(0, sfs.size() - 1);
++        auto sf = sfs.at(sfIdx);
++        netdev->SetSpreadingFactor(sf);
++        size_t freqIdx = rv->GetInteger(0, freqs.size() - 1);
++        auto freq = freqs.at(freqIdx);
++        netdev->SetFrequencies({freq});
++        alloc[sf][TX_POWER]++;
++    }
++    return alloc;
++}
++
++CluesHelper::Allocation_t
++CluesHelper::ConfigSingleSF7TxChannel(const NetDeviceContainer& devices)
++{
++    NS_LOG_FUNCTION_NOARGS();
++    const uint8_t TX_POWER = 14;
++    const uint8_t SF = 7;
++    const auto FREQ = CluesNetDevice::m_frequenciesMHz.at(0);
++    for (auto i = devices.Begin(); i != devices.End(); ++i)
++    {
++        auto netdev = DynamicCast<SensorNetDevice>(*i);
++        NS_ASSERT(netdev);
++        netdev->SetTxPower(TX_POWER);
++        netdev->SetSpreadingFactor(SF);
++        netdev->SetFrequencies({FREQ});
++    }
++    return Allocation_t({{SF, {{TX_POWER, devices.GetN()}}}});
++}
++
++double
++CluesHelper::GetMaxRxPowerReliableMargin(Ptr<MobilityModel> position,
++                                         uint8_t txPower,
++                                         uint8_t sf,
++                                         double freq,
++                                         const NetDeviceContainer& gateways,
++                                         Ptr<const LoraChannel> channel)
++{
++    const double sdev = 9.9; // see https://doi.org/10.1109/VTC2021-Fall52928.2021.9625531
++    auto max = -999.0;       // dB
++    for (auto i = gateways.Begin(); i != gateways.End(); ++i)
++    {
++        auto netdev = DynamicCast<LoraGatewayNetDevice>(*i);
++        NS_ASSERT(netdev);
++        auto phy = netdev->GetPhy();
++        NS_ASSERT(phy);
++        if (!phy->IsOnSF(sf) || !phy->IsOnFrequency(freq))
++        {
++            continue;
++        }
++        auto gwPosition = netdev->GetNode()->GetObject<MobilityModel>();
++        NS_ASSERT(gwPosition);
++        double mean = channel->GetRxPower(txPower, position, gwPosition); // dBm
++        double lowPercent = mean - 2 * sdev;                              // dBm
++        double margin = lowPercent - phy->GetSensitivity(sf);             // dB
++        if (margin > max)
++        {
++            max = margin;
++        }
++    }
++    NS_LOG_DEBUG("SF=" << (unsigned)sf << ", TP=" << (unsigned)txPower << "dBm, freq=" << freq
++                       << "MHz, maxMargin=" << max << "dB");
++    return max;
++}
++
++} // namespace lorawan
++} // namespace ns3
+diff --git a/helper/clues-helper.h b/helper/clues-helper.h
+new file mode 100644
+index 0000000..d9548b5
+--- /dev/null
++++ b/helper/clues-helper.h
+@@ -0,0 +1,179 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#ifndef CLUES_HELPER_H
++#define CLUES_HELPER_H
++
++#include "ns3/lora-channel.h"
++#include "ns3/net-device-container.h"
++#include "ns3/node-container.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++/**
++ * \ingroup lorawan
++ *
++ * Helps creating CluesNetDevice objects.
++ *
++ * This class can help create a large set of similar CluesNetDevice objects and
++ * configure a large set of their attributes during creation.
++ */
++class CluesHelper
++{
++  public:
++    using Allocation_t = std::map<uint8_t, std::map<uint8_t, double>>;
++
++    /**
++     * Enum for the type of device to install.
++     */
++    enum DeviceType
++    {
++        Sensor,
++        SingleChannelGateway,
++        ClassicGateway,
++    };
++
++    CluesHelper() = delete; //!< Delete Constructor
++
++    /**
++     * Install CluesNetDevices on a list of nodes.
++     *
++     * \param c The set of nodes on which a CLUES device will be installed.
++     * \param channel The lora radio channel to be used by the nodes.
++     * \param type The type of CLUES net device to be created.
++     * \return A device container which contains all the devices created by this method.
++     */
++    static NetDeviceContainer Install(NodeContainer c, Ptr<LoraChannel> channel, DeviceType type);
++
++    /**
++     * Install LoraNetDevice on a single node.
++     *
++     * \param node The node on which a CLUES device will be installed.
++     * \param channel The lora radio channel to be used by the node.
++     * \param type The type of CLUES net device to be created.
++     * \return A device container which contains all the devices created by this method.
++     */
++    static NetDeviceContainer Install(Ptr<Node> node, Ptr<LoraChannel> channel, DeviceType type);
++
++    /**
++     * Randomize initial rx parameters of single channel gateways.
++     *
++     * \warning Requires a SimpleEndDeviceLoraPhy installed in LoraGatewayNetDevice objects.
++     *
++     * \param gateways A LoraGatewayNetDevice container of single channel gateways.
++     */
++    static void ConfigRandomRxParams(const NetDeviceContainer& gateways);
++
++    /**
++     * Assign reception parameters (i.e., frequencies) of multi channel gateways.
++     *
++     * \warning Requires a SimpleGatewayLoraPhy installed in LoraGatewayNetDevice objects.
++     *
++     * \param gateways A LoraGatewayNetDevice container of multi channel gateways.
++     */
++    static void ConfigAllRxFrequencies(const NetDeviceContainer& gateways);
++
++    /**
++     * Install a common SF7 channel on single channel gateways.
++     *
++     * \warning Requires a SimpleEndDeviceLoraPhy installed in LoraGatewayNetDevice objects.
++     *
++     * \param gateways A LoraGatewayNetDevice container of single channel gateways.
++     */
++    static void ConfigSingleSF7RxChannel(const NetDeviceContainer& gateways);
++
++    /**
++     * Assuming perfect knowledge of the path loss model (mean by distance, variance), determine the
++     * single lowest SF and Tx power that can be used by each device.
++     *
++     * \warning Requires SimpleGatewayLoraPhy installed on input gateways' LoraGatewayNetDevice.
++     *
++     * Here, we call 'reception power reliable margin' [dB] the highest margin between a reliable
++     * value for reception power [dBm] and the receiver sensitivity [dBm] among the set of gateways.
++     * For specifics, \see GetMaxRxPowerReliableMargin.
++     *
++     * For each device, considering the provided set of gateways, the lowest SF is selected among
++     * the ones with a positive margin. After choosing the best SF, the transmission power is
++     * lowered until the reception power margin is still positive.
++     *
++     * The frequency channels are left to the default (hopping over 8 channels).
++     *
++     * \param devices The set of devices whose parameters are to be optimized.
++     * \param gateways The set of multi-channel gateways to use for radio quality measurements.
++     * \param channel The channel used to sample RSSI values.
++     * \return Parameter distribution at the end of the allocation mapped by [SF][TxPower].
++     */
++    static Allocation_t ConfigIdealTxParams(const NetDeviceContainer& devices,
++                                            const NetDeviceContainer& gateways,
++                                            Ptr<const LoraChannel> channel);
++
++    /**
++     * Set all input devices to transmit on a random single (SF and frequency) pair.
++     *
++     * Tx power is left to the max.
++     *
++     * \param devices The set of devices whose parameters are to be configured.
++     */
++    static Allocation_t ConfigRandomTxParams(const NetDeviceContainer& devices);
++
++    /**
++     * Set all input devices to transmit on SF7 and a common frequency.
++     *
++     * Tx power is left to the max.
++     *
++     * \param devices The set of devices whose parameters are to be configured.
++     */
++    static Allocation_t ConfigSingleSF7TxChannel(const NetDeviceContainer& devices);
++
++  private:
++    /**
++     * Compute the highest reception power reliable margin between the provided position and a
++     * set of gateways.
++     *
++     * Only gateways listening to the provided combination of (SF, frequency) are considered.
++     * This is always true if the gateways have multi-channel hardware.
++     *
++     * For each valid gateway, exact path loss model knowledge is used to compute the
++     * low 2.275th percentile value of reception power. The gateway sensitivity is then
++     * subtracted to the reception power value to produce a margin. The maximum margin among
++     * gateways is returned.
++     *
++     * \param position A reference position.
++     * \param txPower A reference transmission power.
++     * \param sf A reference spreading factor.
++     * \param freq A reference carrier frequency.
++     * \param gateways A container of receiver gateways.
++     * \param channel The channel used to sample RSSI and SNR values.
++     * \return The maximum value for the sensitivity-RSSI margin among the provided gateways.
++     */
++    static double GetMaxRxPowerReliableMargin(Ptr<MobilityModel> position,
++                                              uint8_t txPower,
++                                              uint8_t sf,
++                                              double freq,
++                                              const NetDeviceContainer& gateways,
++                                              Ptr<const LoraChannel> channel);
++};
++
++} // namespace lorawan
++} // namespace ns3
++
++#endif /* CLUES_HELPER_H */
+diff --git a/helper/clues-tracker.cc b/helper/clues-tracker.cc
+new file mode 100644
+index 0000000..c0df2cb
+--- /dev/null
++++ b/helper/clues-tracker.cc
+@@ -0,0 +1,380 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "clues-tracker.h"
++
++#include "ns3/clues-net-device.h"
++#include "ns3/energy-source-container.h"
++#include "ns3/lora-gateway-net-device.h"
++#include "ns3/sensor-net-device.h"
++
++#include <fstream>
++#include <iomanip>
++
++namespace ns3
++{
++namespace lorawan
++{
++
++NS_LOG_COMPONENT_DEFINE("CluesTracker");
++
++CluesTracker::OutcomeCounter&
++CluesTracker::OutcomeCounter::operator+=(const OutcomeCounter& oc)
++{
++    sent += oc.sent;
++    received += oc.received;
++    interfered += oc.interfered;
++    noFreeReceiver += oc.noFreeReceiver;
++    wrongSFOrFrequency += oc.wrongSFOrFrequency;
++    underSensitivity += oc.underSensitivity;
++    return *this;
++}
++
++std::string
++CluesTracker::OutcomeCounter::to_csv_line() const
++{
++    std::stringstream ss;
++    ss << (unsigned)sent << "," << (unsigned)received << "," << (unsigned)interfered << ","
++       << (unsigned)noFreeReceiver << "," << (unsigned)wrongSFOrFrequency << ","
++       << (unsigned)underSensitivity << "\n";
++    return ss.str();
++}
++
++CluesTracker::PacketDuplication&
++CluesTracker::PacketDuplication::operator+=(const PacketDuplication& pd)
++{
++    totalRecv += pd.totalRecv;
++    uniqueRecv += pd.uniqueRecv;
++    return *this;
++}
++
++double
++CluesTracker::PacketDuplication::avg() const
++{
++    return (double)totalRecv / (double)uniqueRecv;
++}
++
++CluesTracker::CluesTracker()
++    : m_lastTimePrint(std::time(nullptr))
++{
++}
++
++CluesTracker::~CluesTracker()
++{
++}
++
++void
++CluesTracker::ConnectUplinkPhyTraces(NetDeviceContainer c)
++{
++    Ptr<CluesNetDevice> nd;
++    Ptr<LoraPhy> phy;
++    TypeId tid;
++    for (auto i = c.Begin(); i != c.End(); ++i)
++    {
++        nd = DynamicCast<CluesNetDevice>(*i);
++        NS_ASSERT(nd);
++        phy = nd->GetPhy();
++        NS_ASSERT(phy);
++        if (auto nd = DynamicCast<SensorNetDevice>(*i); nd)
++        {
++            tid = nd->GetTypeId();
++            phy->TraceConnectWithoutContext(
++                "StartSending",
++                MakeCallback(&CluesTracker::TransmissionCallback, this));
++        }
++        else if (auto nd = DynamicCast<LoraGatewayNetDevice>(*i); nd)
++        {
++            tid = nd->GetTypeId();
++            phy->TraceConnectWithoutContext(
++                "ReceivedPacket",
++                MakeCallback(&CluesTracker::PacketReceptionCallback, this));
++            phy->TraceConnectWithoutContext(
++                "LostPacketBecauseInterference",
++                MakeCallback(&CluesTracker::InterferenceCallback, this));
++            phy->TraceConnectWithoutContext(
++                "NoReceptionBecauseTransmitting",
++                MakeCallback(&CluesTracker::LostBecauseTxCallback, this));
++            phy->TraceConnectWithoutContext("LostPacketBecauseWrongFrequency",
++                                            MakeCallback(&CluesTracker::WrongSfOrFrequency, this));
++            phy->TraceConnectWithoutContext("LostPacketBecauseWrongSpreadingFactor",
++                                            MakeCallback(&CluesTracker::WrongSfOrFrequency, this));
++            phy->TraceConnectWithoutContext(
++                "LostPacketBecauseNoMoreReceivers",
++                MakeCallback(&CluesTracker::NoMoreReceiversCallback, this));
++            phy->TraceConnectWithoutContext(
++                "LostPacketBecauseUnderSensitivity",
++                MakeCallback(&CluesTracker::UnderSensitivityCallback, this));
++        }
++        else
++        {
++            NS_ABORT_MSG("Unsupported NetDevice type");
++        }
++        NS_LOG_DEBUG("Connected uplink traces for " << tid << " of node " << nd->GetNode()->GetId()
++                                                    << ".");
++    }
++}
++
++////////////////////////
++// Printing Functions //
++////////////////////////
++
++void
++CluesTracker::PrintTotalPacketOutcomes(std::string&& filename)
++{
++    m_metrics.outcomes += CountPacketOutcomes();
++    auto oc = m_metrics.outcomes;
++
++    std::ofstream outputFile;
++    outputFile.open(filename.c_str(), std::ofstream::out | std::ofstream::trunc);
++    outputFile << "Sent,Received,Interfered,NoFreeReceivers,WrongSfOrFreq,UnderSensitivity\n";
++    outputFile << oc.to_csv_line();
++    outputFile.close();
++
++    auto s = oc.sent;
++    std::cout << "• Sent: " << s << ", " << double(oc.received) / s * 100 << "% PDR, "
++              << double(oc.interfered) / s * 100 << "% Interfered, "
++              << double(oc.noFreeReceiver) / s * 100 << "% NoFreeReceivers, "
++              << double(oc.wrongSFOrFrequency) / s * 100 << "% WrongSfOrFreq, "
++              << double(oc.underSensitivity) / s * 100 << "% UnderSensitivity\n"
++              << std::endl;
++}
++
++void
++CluesTracker::PrintTotalDuplicationStatistics(std::string&& filename)
++{
++    m_metrics.duplication += GetDuplicationStats();
++    auto dupl = m_metrics.duplication.avg();
++
++    std::ofstream outputFile;
++    outputFile.open(filename.c_str(), std::ofstream::out | std::ofstream::trunc);
++    outputFile << "Duplications\n" << std::setprecision(10) << dupl << std::endl;
++    outputFile.close();
++
++    std::cout << "• Duplications: " << dupl << "\n" << std::endl;
++}
++
++void
++CluesTracker::PrintTotalDeviceEnergyConsumption(std::string&& filename, const NodeContainer& c)
++{
++    auto totalEnergyJ = GetTotalDeviceEnergyConsumption(c);
++
++    std::ofstream outputFile;
++    outputFile.open(filename.c_str(), std::ofstream::out | std::ofstream::trunc);
++    outputFile << "TotalEnergyJ\n" << std::setprecision(10) << totalEnergyJ << std::endl;
++    outputFile.close();
++
++    std::cout << "• TotalEnergy: " << totalEnergyJ << "J\n" << std::endl;
++}
++
++void
++CluesTracker::PrintTxParamAllocationShares(const Allocation_t& allocation,
++                                           std::string filename,
++                                           std::stringstream& ss)
++{
++    ss << "\n|- # params:    ";
++    std::ofstream outputFile;
++    outputFile.open(filename.c_str(), std::ofstream::out | std::ofstream::trunc);
++    outputFile << "SF,TP_dBm,share\n";
++    for (const auto& [sf, subMap] : allocation)
++    {
++        for (const auto& [tp, num] : subMap)
++        {
++            ss << "SF" << (unsigned)sf << "_" << (unsigned)tp << "dBm:" << num << " ";
++            outputFile << (unsigned)sf << "," << (unsigned)tp << "," << num << "\n";
++        }
++        ss << "\n                ";
++    }
++    outputFile.close();
++}
++
++void
++CluesTracker::EnableSimulationTimePrinting(Time interval)
++{
++    time_t oldTime = m_lastTimePrint;
++    m_lastTimePrint = std::time(nullptr);
++    std::cout << "Simulated time: " << Simulator::Now().GetHours() << " hours ("
++              << m_lastTimePrint - oldTime << "s real time from last call)\n"
++              << std::endl;
++    Simulator::Schedule(interval, &CluesTracker::EnableSimulationTimePrinting, this, interval);
++}
++
++void
++CluesTracker::EnablePeriodicDataCleanup(Time interval)
++{
++    auto now = Simulator::Now();
++    if (now > Seconds(0))
++    {
++        m_metrics.outcomes += CountPacketOutcomes();
++        m_metrics.duplication += GetDuplicationStats();
++        // remove entries older than 10 seconds
++        auto t = now - Seconds(10);
++        std::erase_if(m_phyData, [&t](const auto& p) { return p.second.sendTime <= t; });
++    }
++    Simulator::Schedule(interval, &CluesTracker::EnablePeriodicDataCleanup, this, interval);
++}
++
++////////////////////////
++// Counting Functions //
++////////////////////////
++
++CluesTracker::OutcomeCounter
++CluesTracker::CountPacketOutcomes() const
++{
++    OutcomeCounter oc;
++    auto threshold = Simulator::Now() - Seconds(10);
++    for (const auto& [packet, data] : m_phyData)
++    {
++        if (data.sendTime > threshold)
++        {
++            continue;
++        }
++        oc.sent++;
++        PhyPktOutcome best = UNDER_SENSITIVITY;
++        for (const auto& [_, o] : data.outcomes)
++        {
++            best = (o < best) ? o : best;
++        }
++        switch (best)
++        {
++        case RECEIVED:
++            oc.received++;
++            break;
++        case INTERFERED:
++            oc.interfered++;
++            break;
++        case NO_FREE_RECEIVERS:
++            oc.noFreeReceiver++;
++            break;
++        case WRONG_SF_OR_FREQ:
++            oc.wrongSFOrFrequency++;
++            break;
++        case UNDER_SENSITIVITY:
++            oc.underSensitivity++;
++            break;
++        }
++    }
++    return oc;
++}
++
++CluesTracker::PacketDuplication
++CluesTracker::GetDuplicationStats() const
++{
++    PacketDuplication pd;
++    auto threshold = Simulator::Now() - Seconds(10);
++    for (const auto& [packet, data] : m_phyData)
++    {
++        if (data.sendTime > threshold)
++        {
++            continue;
++        }
++        bool rec = false;
++        for (const auto& [gw, o] : data.outcomes)
++        {
++            if (o == RECEIVED)
++            {
++                if (!rec)
++                {
++                    pd.uniqueRecv++;
++                    rec = true;
++                }
++                pd.totalRecv++;
++            }
++        }
++    }
++    return pd;
++}
++
++double
++CluesTracker::GetTotalDeviceEnergyConsumption(const NodeContainer& c)
++{
++    double totalEnergyJ = 0;
++    for (auto it = c.Begin(); it < c.End(); it++)
++    {
++        if (auto esc = (*it)->GetObject<EnergySourceContainer>(); esc)
++        {
++            auto demc = esc->Get(0)->FindDeviceEnergyModels("ns3::LoraRadioEnergyModel");
++            if (demc.GetN() > 0)
++            {
++                totalEnergyJ += demc.Get(0)->GetTotalEnergyConsumption();
++            }
++        }
++    }
++    if (totalEnergyJ == 0)
++    {
++        NS_LOG_WARN("totalEnergyJ == 0, did you install LoraRadioEnergyModel on devices?");
++    }
++    return totalEnergyJ;
++}
++
++////////////////////////////
++// Trace system callbacks //
++////////////////////////////
++
++void
++CluesTracker::TransmissionCallback(Ptr<const Packet> p, uint32_t id)
++{
++    NS_LOG_DEBUG("PHY packet " << p << " was transmitted by device " << id);
++    PhyPktStatus status = {.senderId = id, .sendTime = Simulator::Now()};
++    m_phyData.emplace(p, status);
++}
++
++void
++CluesTracker::PacketReceptionCallback(Ptr<const Packet> p, uint32_t id)
++{
++    NS_LOG_DEBUG("PHY packet " << p << " was successfully received at gateway " << id);
++    m_phyData.at(p).outcomes.emplace(id, RECEIVED);
++}
++
++void
++CluesTracker::InterferenceCallback(Ptr<const Packet> p, uint32_t id)
++{
++    NS_LOG_DEBUG("PHY packet " << p << " was interfered at gateway " << id);
++    m_phyData.at(p).outcomes.emplace(id, INTERFERED);
++}
++
++void
++CluesTracker::UnderSensitivityCallback(Ptr<const Packet> p, uint32_t id)
++{
++    NS_LOG_DEBUG("PHY packet " << p << " was lost because under sensitivity at gateway " << id);
++    m_phyData.at(p).outcomes.emplace(id, UNDER_SENSITIVITY);
++}
++
++void
++CluesTracker::WrongSfOrFrequency(Ptr<const Packet> p, uint32_t id)
++{
++    NS_LOG_DEBUG("PHY packet " << p << " lost to wrong sf or frequency at gateway " << id);
++    m_phyData.at(p).outcomes.emplace(id, WRONG_SF_OR_FREQ);
++}
++
++void
++CluesTracker::NoMoreReceiversCallback(Ptr<const Packet> p, uint32_t id)
++{
++    NS_LOG_DEBUG("PHY packet " << p << " was lost because no more receivers at gateway " << id);
++    m_phyData.at(p).outcomes.emplace(id, NO_FREE_RECEIVERS);
++}
++
++void
++CluesTracker::LostBecauseTxCallback(Ptr<const Packet> p, uint32_t id)
++{
++    NS_LOG_DEBUG("PHY packet " << p << " lost to concurrent transmission at gateway " << id);
++    m_phyData.at(p).outcomes.emplace(id, NO_FREE_RECEIVERS);
++}
++
++} // namespace lorawan
++} // namespace ns3
+diff --git a/helper/clues-tracker.h b/helper/clues-tracker.h
+new file mode 100644
+index 0000000..2257a85
+--- /dev/null
++++ b/helper/clues-tracker.h
+@@ -0,0 +1,307 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#ifndef CLUES_TRACKER_H
++#define CLUES_TRACKER_H
++
++#include "ns3/net-device-container.h"
++#include "ns3/node-container.h"
++#include "ns3/nstime.h"
++#include "ns3/packet.h"
++
++#include <ctime>
++#include <map>
++
++namespace ns3
++{
++namespace lorawan
++{
++
++/**
++ * \ingroup lorawan
++ *
++ * Tracks and stores packets sent in the simulation and provides aggregation functionality
++ */
++class CluesTracker
++{
++    enum PhyPktOutcome
++    {
++        RECEIVED = 1,
++        INTERFERED,
++        NO_FREE_RECEIVERS,
++        WRONG_SF_OR_FREQ,
++        UNDER_SENSITIVITY,
++    };
++
++    /**
++     * \ingroup lorawan
++     *
++     * Stores PHY-layer uplink packet metrics of sender/receivers.
++     */
++    struct PhyPktStatus
++    {
++        uint32_t senderId; //!< Node id of the packet sender
++        Time sendTime;     //!< Timestamp of pkt radio tx start
++        std::unordered_map<uint32_t, PhyPktOutcome>
++            outcomes; //!< Reception outcome of this pkt at the end
++                      //!< of the tx, mapped by gateway's node id
++    };
++
++    /**
++     * \ingroup lorawan
++     *
++     * Stores counters for packet outcomes.
++     */
++    struct OutcomeCounter
++    {
++        uint32_t sent = 0;               //!< Total packets sent
++        uint32_t received = 0;           //!< Total packets received
++        uint32_t interfered = 0;         //!< Total packets lost to interference
++        uint32_t noFreeReceiver = 0;     //!< Total packets lost to lack of free receivers
++        uint32_t wrongSFOrFrequency = 0; //!< Total packets lost to lack of suitable receiver
++        uint32_t underSensitivity = 0;   //!< Total packets lost for being out of range
++
++        OutcomeCounter& operator+=(const OutcomeCounter& oc);
++        std::string to_csv_line() const;
++    };
++
++    /**
++     * \ingroup lorawan
++     *
++     * Stores total counters for packet duplication metric.
++     */
++    struct PacketDuplication
++    {
++        uint64_t totalRecv = 0;  //!< Total packet receptions by gateways
++        uint64_t uniqueRecv = 0; //!< Total unique packets received
++
++        PacketDuplication& operator+=(const PacketDuplication& pd);
++        double avg() const;
++    };
++
++    /**
++     * \ingroup lorawan
++     *
++     * Stores total counters for all metrics traced over time.
++     */
++    struct TracedMetrics
++    {
++        OutcomeCounter outcomes;       //!< Track all simulation outcomes over time
++        PacketDuplication duplication; //!< Track all packet duplications over time
++    };
++
++    using Allocation_t = std::map<uint8_t, std::map<uint8_t, double>>;
++
++  public:
++    CluesTracker();  //!< Default constructor
++    ~CluesTracker(); //!< Destructor
++
++    /**
++     * Connect PHY layer trace sources for uplink packet reception.
++     *
++     * \param c Container of CluesNetDevice objects to connect.
++     */
++    void ConnectUplinkPhyTraces(NetDeviceContainer c);
++
++    ////////////////////////
++    // Printing functions //
++    ////////////////////////
++
++    /**
++     * Print network's total packet reception outcomes to a file.
++     *
++     * \see CountTotalPacketOutcomes for more details.
++     *
++     * \param filename A string containing the path to the output file.
++     */
++    void PrintTotalPacketOutcomes(std::string&& filename);
++
++    /**
++     * Print network's packet duplication statistics to a file.
++     *
++     * \see CountDuplicationStatistics for more details.
++     *
++     * \param filename A string containing the path to the output file.
++     */
++    void PrintTotalDuplicationStatistics(std::string&& filename);
++
++    /**
++     * Print total energy consumed by end devices up to now.
++     *
++     * \see GetTotalDeviceEnergyConsumption for more details.
++     *
++     * \param filename A string containing the path to the output file.
++     * \param c Container for the end device nodes to be considered.
++     */
++    static void PrintTotalDeviceEnergyConsumption(std::string&& filename, const NodeContainer& c);
++
++    /**
++     * Print SF and transmission power allocation of devices.
++     *
++     * \param allocation Parameter allocation to devices.
++     * \param filename A string containing the path to the output file.
++     * \param ss A string stream for printing to standard output.
++     */
++    static void PrintTxParamAllocationShares(const Allocation_t& allocation,
++                                             std::string filename,
++                                             std::stringstream& ss);
++
++    /**
++     * Periodically prints the simulation time to the standard output.
++     *
++     * \param interval The time period of the interval.
++     */
++    void EnableSimulationTimePrinting(Time interval);
++
++    /**
++     * For memory management, periodically update traced metrics with collected data and flush it.
++     *
++     * \param interval The time period of the interval.
++     */
++    void EnablePeriodicDataCleanup(Time interval);
++
++  private:
++    ///////////////////////////////
++    // Packet counting functions //
++    ///////////////////////////////
++
++    /**
++     * Count packet reception outcomes of the network to evaluate PHY layer performance and returns
++     * them as a fixed-size array. For each packet stored in this class, we select one outcome over
++     * all receivers and add it to the respective counter. Packets sent less than 2 seconds from the
++     * current simulation time are not considered because they may have an incomplete set of
++     * outcomes.
++     *
++     * Outcome priority at receiver gw (i.e., if outcome matches, subsequent checks are skipped):
++     * - UNDER_SENSITIVITY: Tx was under sensitivity for the receiver,
++     * - WRONG_SF_OR_FREQ: gw was in-range but set to listen to the wrong sf or freq. (SINGLE
++     * CHANNEL GW ONLY),
++     * - LOST_BECAUSE_TX: gw was in-range and set to listen to the right sf and freq, but at the
++     * time was in tx mode,
++     * - NO_MORE_RECEIVERS: gw was in-range and set to listen to the right sf and freq, but at the
++     * time all its reception paths were already locked on different rxs,
++     * - INTERFERED: gw was in-range, set to listen to the right sf and freq, and free for
++     * rx, but collision caused pkt to be lost (either could not lock on preamble or rx was
++     * corrupted),
++     * - RECEIVED
++     *
++     * Multi-gw packet-loss-cause aggregation criteria/priority:
++     * - UNDER_SENSITIVITY: all gws were out of range
++     * - WRONG_SF_OR_FREQ: there was at least 1 gw in-range. All of such gws were listening to wrong
++     * sf or frq.
++     * - NO_FREE_RECEIVERS: there was at least 1 gw in range and listening on the right freq. and
++     * sf. All such gws were busy (either already receiving ot transmitting downlink).
++     * - INTERFERED: there was at least 1 gw in range, listening on the right freq. and sf, and
++     * available for rx. All such gws lost the pkt to a collision.
++     * - RECEIVED
++     *
++     * \return The array of counters for each possible outcome.
++     */
++    OutcomeCounter CountPacketOutcomes() const;
++
++    /**
++     * Collect counters for computing the packet duplication index: total number packet receptions
++     * divided by the number of unique packets sent (Each packet will contribute by the amount of
++     * its RECEIVED outcomes. \see PrintTotalPacketOutcomes.) Packets sent less than 2 seconds from
++     * the current simulation time are not considered because they may have an incomplete set of
++     * outcomes.
++     *
++     * \return A struct with the necessary counters to compute the metric.
++     */
++    PacketDuplication GetDuplicationStats() const;
++
++    /**
++     *  Compute total energy [J] consumed by end devices up to now.
++     *
++     * \param c Container for the end device nodes to be considered.
++     * \return Total energy consumption in Joules
++     */
++    static double GetTotalDeviceEnergyConsumption(const NodeContainer& c);
++
++    ///////////////////////////
++    // PHY layer trace sinks //
++    ///////////////////////////
++
++    // Packet transmission by end devices
++
++    /**
++     * Trace a packet TX start by the PHY layer of an end device.
++     *
++     * \param p The packet being transmitted.
++     * \param id Id of end device transmitting the packet.
++     */
++    void TransmissionCallback(Ptr<const Packet> p, uint32_t id);
++
++    // Packet reception outcome at gateways
++
++    /**
++     * Trace a correct packet RX by the PHY layer of a gateway.
++     *
++     * \param p The packet being received.
++     * \param id Id of the gateway receiving the packet.
++     */
++    void PacketReceptionCallback(Ptr<const Packet> p, uint32_t id);
++    /**
++     * Trace a gateway packet loss caused by interference.
++     *
++     * \param p The packet being lost.
++     * \param id Id of the gateway losing the packet.
++     */
++    void InterferenceCallback(Ptr<const Packet> p, uint32_t id);
++    /**
++     * Trace a gateway packet loss caused by wrong sf or frequency being monitored.
++     *
++     * \param p The packet being lost.
++     * \param id Id of the gateway losing the packet.
++     */
++    void WrongSfOrFrequency(Ptr<const Packet> p, uint32_t id);
++    /**
++     * Trace a gateway packet loss caused by lack of free reception paths.
++     *
++     * \param p The packet being lost.
++     * \param id Id of the gateway losing the packet.
++     */
++    void NoMoreReceiversCallback(Ptr<const Packet> p, uint32_t id);
++    /**
++     * Trace a gateway packet loss caused by signal strength under sensitivity.
++     *
++     * \param p The packet being lost.
++     * \param id Id of the gateway losing the packet.
++     */
++    void UnderSensitivityCallback(Ptr<const Packet> p, uint32_t id);
++    /**
++     * Trace a gateway packet loss caused by concurrent downlink transmission.
++     *
++     * \param p The packet being lost.
++     * \param id Id of the gateway losing the packet.
++     */
++    void LostBecauseTxCallback(Ptr<const Packet> p, uint32_t id);
++
++    std::unordered_map<Ptr<const Packet>, PhyPktStatus>
++        m_phyData; //!< Packet map of PHY layer metrics
++
++    TracedMetrics m_metrics; //!< Counters for metrics traced over time
++
++    time_t m_lastTimePrint; //!< Store timestamp of last simulation time print to stdout
++};
++
++} // namespace lorawan
++} // namespace ns3
++
++#endif /* CLUES_TRACKER_H */
+diff --git a/helper/lora-phy-helper.cc b/helper/lora-phy-helper.cc
+index e0a80d1..da79655 100644
+--- a/helper/lora-phy-helper.cc
++++ b/helper/lora-phy-helper.cc
+@@ -15,11 +15,13 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "lora-phy-helper.h"
+ 
+ #include "ns3/log.h"
++#include "ns3/lora-gateway-net-device.h"
+ #include "ns3/sub-band.h"
+ 
+ namespace ns3
+@@ -119,8 +121,10 @@ LoraPhyHelper::Create(Ptr<Node> node, Ptr<NetDevice> device) const
+         // This implies that the LoraChannel instance will only know about
+         // Gateways, and it will not lose time delivering packets and interference
+         // information to devices which will never listen.
+-
+-        m_channel->Add(phy);
++        if (auto d = DynamicCast<LoraGatewayNetDevice>(device); d)
++        {
++            m_channel->Add(phy);
++        }
+     }
+ 
+     // Link the PHY to its net device
+diff --git a/helper/lora-radio-energy-model-helper.cc b/helper/lora-radio-energy-model-helper.cc
+index 2e8da59..74b7aa1 100644
+--- a/helper/lora-radio-energy-model-helper.cc
++++ b/helper/lora-radio-energy-model-helper.cc
+@@ -15,12 +15,13 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Romagnolo Stefano <romagnolostefano93@gmail.com>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "lora-radio-energy-model-helper.h"
+ 
++#include "ns3/clues-net-device.h"
+ #include "ns3/end-device-lora-phy.h"
+-#include "ns3/lora-net-device.h"
+ #include "ns3/lora-tx-current-model.h"
+ 
+ namespace ns3
+@@ -85,30 +86,27 @@ LoraRadioEnergyModelHelper::DoInstall(Ptr<NetDevice> device, Ptr<EnergySource> s
+     NS_ASSERT(device);
+     NS_ASSERT(source);
+     // check if device is LoraNetDevice
+-    std::string deviceName = device->GetInstanceTypeId().GetName();
+-    if (deviceName != "ns3::LoraNetDevice")
++    auto dev = DynamicCast<CluesNetDevice>(device);
++    if (!dev)
+     {
+-        NS_FATAL_ERROR("NetDevice type is not LoraNetDevice!");
++        NS_FATAL_ERROR("NetDevice type is not CluesNetDevice!");
+     }
+-    Ptr<Node> node = device->GetNode();
+-    Ptr<LoraRadioEnergyModel> model = m_radioEnergy.Create()->GetObject<LoraRadioEnergyModel>();
++    auto model = DynamicCast<LoraRadioEnergyModel>(m_radioEnergy.Create());
+     NS_ASSERT(model);
+     // set energy source pointer
+     model->SetEnergySource(source);
+ 
+     // set energy depletion callback
+     // if none is specified, make a callback to EndDeviceLoraPhy::SetSleepMode
+-    Ptr<LoraNetDevice> loraDevice = device->GetObject<LoraNetDevice>();
+-    Ptr<EndDeviceLoraPhy> loraPhy = loraDevice->GetPhy()->GetObject<EndDeviceLoraPhy>();
++    auto phy = DynamicCast<EndDeviceLoraPhy>(dev->GetPhy());
+     // add model to device model list in energy source
+     source->AppendDeviceEnergyModel(model);
+     // create and register energy model phy listener
+-    loraPhy->RegisterListener(model->GetPhyListener());
++    phy->RegisterListener(model->GetPhyListener());
+ 
+     if (m_txCurrentModel.GetTypeId().GetUid())
+     {
+-        Ptr<LoraTxCurrentModel> txcurrent = m_txCurrentModel.Create<LoraTxCurrentModel>();
+-        model->SetTxCurrentModel(txcurrent);
++        model->SetTxCurrentModel(m_txCurrentModel.Create<LoraTxCurrentModel>());
+     }
+     return model;
+ }
+diff --git a/helper/periodic-sender-helper.cc b/helper/periodic-sender-helper.cc
+index d61637e..8ebb7ec 100644
+--- a/helper/periodic-sender-helper.cc
++++ b/helper/periodic-sender-helper.cc
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "periodic-sender-helper.h"
+@@ -49,7 +50,6 @@ PeriodicSenderHelper::PeriodicSenderHelper()
+     m_intervalProb->SetAttribute("Max", DoubleValue(1));
+ 
+     m_pktSize = 10;
+-    m_pktSizeRV = nullptr;
+ }
+ 
+ PeriodicSenderHelper::~PeriodicSenderHelper()
+@@ -121,10 +121,6 @@ PeriodicSenderHelper::InstallPriv(Ptr<Node> node) const
+ 
+     app->SetInitialDelay(Seconds(m_initialDelay->GetValue(0, interval.GetSeconds())));
+     app->SetPacketSize(m_pktSize);
+-    if (m_pktSizeRV)
+-    {
+-        app->SetPacketSizeRandomVariable(m_pktSizeRV);
+-    }
+ 
+     app->SetNode(node);
+     node->AddApplication(app);
+@@ -138,12 +134,6 @@ PeriodicSenderHelper::SetPeriod(Time period)
+     m_period = period;
+ }
+ 
+-void
+-PeriodicSenderHelper::SetPacketSizeRandomVariable(Ptr<RandomVariableStream> rv)
+-{
+-    m_pktSizeRV = rv;
+-}
+-
+ void
+ PeriodicSenderHelper::SetPacketSize(uint8_t size)
+ {
+diff --git a/helper/periodic-sender-helper.h b/helper/periodic-sender-helper.h
+index c80a370..f2084f8 100644
+--- a/helper/periodic-sender-helper.h
++++ b/helper/periodic-sender-helper.h
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #ifndef PERIODIC_SENDER_HELPER_H
+@@ -85,14 +86,6 @@ class PeriodicSenderHelper
+      */
+     void SetPeriod(Time period);
+ 
+-    /**
+-     * Set a random variable to enable a random size to be added to the base packet size for
+-     * each new transmission of PacketSender applications.
+-     *
+-     * \param rv The random variable.
+-     */
+-    void SetPacketSizeRandomVariable(Ptr<RandomVariableStream> rv);
+-
+     /**
+      * Set the base value for applications packet size in bytes.
+      *
+@@ -117,9 +110,7 @@ class PeriodicSenderHelper
+         m_intervalProb; //!< The random variable used to pick inter-transmission intervals of
+                         //!< different applications from a discrete probability distribution
+     Time m_period;      //!< The base period with which the application will be set to send messages
+-    Ptr<RandomVariableStream>
+-        m_pktSizeRV;   //!< Whether or not a random component is added to the packet size.
+-    uint8_t m_pktSize; //!< The base packet size.
++    uint8_t m_pktSize;  //!< The base packet size.
+ };
+ 
+ } // namespace lorawan
+diff --git a/helper/random-listener-helper.cc b/helper/random-listener-helper.cc
+new file mode 100644
+index 0000000..0449bf0
+--- /dev/null
++++ b/helper/random-listener-helper.cc
+@@ -0,0 +1,74 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "random-listener-helper.h"
++
++#include "ns3/random-listener.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++NS_LOG_COMPONENT_DEFINE("RandomListenerHelper");
++
++RandomListenerHelper::RandomListenerHelper()
++{
++    m_factory.SetTypeId("ns3::RandomListener");
++}
++
++RandomListenerHelper::~RandomListenerHelper()
++{
++}
++
++void
++RandomListenerHelper::SetAttribute(std::string name, const AttributeValue& value)
++{
++    m_factory.Set(name, value);
++}
++
++ApplicationContainer
++RandomListenerHelper::Install(NodeContainer c) const
++{
++    ApplicationContainer apps;
++    for (auto i = c.Begin(); i != c.End(); ++i)
++    {
++        apps.Add(InstallPriv(*i));
++    }
++    return apps;
++}
++
++ApplicationContainer
++RandomListenerHelper::Install(Ptr<Node> node) const
++{
++    return ApplicationContainer(InstallPriv(node));
++}
++
++Ptr<Application>
++RandomListenerHelper::InstallPriv(Ptr<Node> node) const
++{
++    NS_LOG_FUNCTION(this << node);
++    auto app = m_factory.Create<RandomListener>();
++    app->SetNode(node);
++    node->AddApplication(app);
++    return app;
++}
++
++} // namespace lorawan
++} // namespace ns3
+\ No newline at end of file
+diff --git a/helper/random-listener-helper.h b/helper/random-listener-helper.h
+new file mode 100644
+index 0000000..85ee13d
+--- /dev/null
++++ b/helper/random-listener-helper.h
+@@ -0,0 +1,81 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#ifndef RANDOM_LISTENER_HELPER_H
++#define RANDOM_LISTENER_HELPER_H
++
++#include "ns3/application-container.h"
++#include "ns3/node-container.h"
++#include "ns3/object-factory.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++class RandomListenerHelper
++{
++  public:
++    RandomListenerHelper();  //!< Default constructor
++    ~RandomListenerHelper(); //!< Destructor
++
++    /**
++     * Helper function used to set the underlying application attributes.
++     *
++     * \param name The name of the application attribute to set.
++     * \param value The value of the application attribute to set.
++     */
++    void SetAttribute(std::string name, const AttributeValue& value);
++
++    /**
++     * Install a RandomListener application on each node of the input container
++     * configured with all the attributes set with SetAttribute or other functions of this class.
++     *
++     * \param c NodeContainer of the set of nodes on which an RandomListener
++     * will be installed.
++     * \return Container of Ptr to the applications installed.
++     */
++    ApplicationContainer Install(NodeContainer c) const;
++
++    /**
++     * Install a RandomListener application on the input Node configured with all the attributes set
++     * with SetAttribute or other functions of this class.
++     *
++     * \param node The node on which a RandomListener will be installed.
++     * \return Container of the Ptr to the application installed.
++     */
++    ApplicationContainer Install(Ptr<Node> node) const;
++
++  private:
++    /**
++     * Install a RandomListener application on the input Node configured with all the attributes set
++     * with SetAttribute or other functions of this class.
++     *
++     * \param node The node on which a RandomListener will be installed.
++     * \return A pointer to the application installed.
++     */
++    Ptr<Application> InstallPriv(Ptr<Node> node) const;
++
++    ObjectFactory m_factory; //!< The factory to create RandomListener applications
++};
++
++} // namespace lorawan
++} // namespace ns3
++
++#endif /* RANDOM_LISTENER_HELPER_H */
+\ No newline at end of file
+diff --git a/model/clues-header.cc b/model/clues-header.cc
+new file mode 100644
+index 0000000..f52b930
+--- /dev/null
++++ b/model/clues-header.cc
+@@ -0,0 +1,115 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "clues-header.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++NS_LOG_COMPONENT_DEFINE("CluesHeader");
++
++CluesHeader::CluesHeader()
++    : m_address(0),
++      m_fCnt(0),
++      m_padding(0)
++{
++}
++
++CluesHeader::~CluesHeader()
++{
++}
++
++TypeId
++CluesHeader::GetTypeId()
++{
++    static TypeId tid = TypeId("CluesHeader").SetParent<Header>().AddConstructor<CluesHeader>();
++    return tid;
++}
++
++uint32_t
++CluesHeader::GetSerializedSize() const
++{
++    NS_LOG_FUNCTION_NOARGS();
++    return 12; // This header only consists in 12 Bytes
++}
++
++TypeId
++CluesHeader::GetInstanceTypeId() const
++{
++    return GetTypeId();
++}
++
++void
++CluesHeader::Serialize(Buffer::Iterator start) const
++{
++    NS_LOG_FUNCTION_NOARGS();
++    start.WriteU32(m_address);
++    start.WriteU32(m_fCnt);
++    start.WriteU32(m_padding);
++}
++
++uint32_t
++CluesHeader::Deserialize(Buffer::Iterator start)
++{
++    NS_LOG_FUNCTION_NOARGS();
++    m_padding = start.ReadU32();
++    m_fCnt = start.ReadU32();
++    m_address = start.ReadU32();
++    return 12; // the number of bytes consumed.
++}
++
++void
++CluesHeader::Print(std::ostream& os) const
++{
++    os << "address=" << unsigned(m_address);
++    os << ", fCnt=" << unsigned(m_fCnt);
++}
++
++void
++CluesHeader::SetAddress(uint32_t address)
++{
++    NS_LOG_FUNCTION(this << address);
++    m_address = address;
++}
++
++uint32_t
++CluesHeader::GetAddress() const
++{
++    NS_LOG_FUNCTION_NOARGS();
++    return m_address;
++}
++
++void
++CluesHeader::SetFCnt(uint32_t fCnt)
++{
++    NS_LOG_FUNCTION(this << fCnt);
++    m_fCnt = fCnt;
++}
++
++uint32_t
++CluesHeader::GetFCnt() const
++{
++    NS_LOG_FUNCTION_NOARGS();
++    return m_fCnt;
++}
++
++} // namespace lorawan
++} // namespace ns3
+diff --git a/model/clues-header.h b/model/clues-header.h
+new file mode 100644
+index 0000000..2d6310e
+--- /dev/null
++++ b/model/clues-header.h
+@@ -0,0 +1,90 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#ifndef CLUES_HEADER_H
++#define CLUES_HEADER_H
++
++#include "ns3/header.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++/**
++ * \ingroup lorawan
++ *
++ * This class represents the header of a LoRa CLUES packet.
++ */
++class CluesHeader : public Header
++{
++  public:
++    /**
++     *  Register this type.
++     *  \return The object TypeId.
++     */
++    static TypeId GetTypeId();
++
++    CluesHeader();           //!< Default constructor
++    ~CluesHeader() override; //!< Destructor
++
++    TypeId GetInstanceTypeId() const override;
++    uint32_t GetSerializedSize() const override;
++    void Serialize(Buffer::Iterator start) const override;
++    uint32_t Deserialize(Buffer::Iterator start) override;
++    void Print(std::ostream& os) const override;
++
++    /**
++     * Set the sender address.
++     *
++     * \param address The sender address of this header.
++     */
++    void SetAddress(uint32_t address);
++
++    /**
++     * Get the sender address from the header.
++     *
++     * \return The uint32_t corresponding to this header's sender address.
++     */
++    uint32_t GetAddress() const;
++
++    /**
++     * Set the frame counter.
++     *
++     * \param fCnt The frame counter of this header.
++     */
++    void SetFCnt(uint32_t fCnt);
++
++    /**
++     * Get the frame counter from the header.
++     *
++     * \return The uint32_t corresponding to this header's frame counter.
++     */
++    uint32_t GetFCnt() const;
++
++  private:
++    uint32_t m_address; //!< Address of the sender sensor
++    uint32_t m_fCnt;    //!< Frame counter
++    uint32_t m_padding; //!< Padding reserved for future use
++};
++
++} // namespace lorawan
++} // namespace ns3
++
++#endif /* CLUES_HEADER_H */
+diff --git a/model/clues-net-device.cc b/model/clues-net-device.cc
+new file mode 100644
+index 0000000..8e22f86
+--- /dev/null
++++ b/model/clues-net-device.cc
+@@ -0,0 +1,235 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "clues-net-device.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++NS_LOG_COMPONENT_DEFINE("CluesNetDevice");
++
++NS_OBJECT_ENSURE_REGISTERED(CluesNetDevice);
++
++TypeId
++CluesNetDevice::GetTypeId()
++{
++    static TypeId tid =
++        TypeId("ns3::CluesNetDevice").SetParent<NetDevice>().SetGroupName("lorawan");
++    return tid;
++}
++
++CluesNetDevice::~CluesNetDevice()
++{
++    NS_LOG_FUNCTION(this);
++}
++
++void
++CluesNetDevice::TxFinished(Ptr<const Packet> packet)
++{
++    NS_LOG_FUNCTION(this << packet);
++    // Do nothing by default
++}
++
++void
++CluesNetDevice::Receive(Ptr<const Packet> packet)
++{
++    NS_LOG_FUNCTION(this << packet);
++    // Do nothing by default
++}
++
++void
++CluesNetDevice::SetPhy(Ptr<LoraPhy> phy)
++{
++    NS_LOG_FUNCTION(this << phy);
++    m_phy = phy;
++    // Connect the PHY layer callbacks
++    m_phy->SetTxFinishedCallback(MakeCallback(&CluesNetDevice::TxFinished, this));
++    m_phy->SetReceiveOkCallback(MakeCallback(&CluesNetDevice::Receive, this));
++}
++
++Ptr<LoraPhy>
++CluesNetDevice::GetPhy() const
++{
++    NS_LOG_FUNCTION(this);
++    return m_phy;
++}
++
++Ptr<Node>
++CluesNetDevice::GetNode() const
++{
++    NS_LOG_FUNCTION(this);
++    return m_node;
++}
++
++void
++CluesNetDevice::SetNode(Ptr<Node> node)
++{
++    NS_LOG_FUNCTION(node);
++    m_node = node;
++}
++
++void
++CluesNetDevice::SetReceiveCallback(ReceiveCallback cb)
++{
++    NS_LOG_FUNCTION(this);
++    m_receiveCallback = cb;
++}
++
++void
++CluesNetDevice::DoDispose()
++{
++    NS_LOG_FUNCTION(this);
++    m_node = nullptr;
++    m_phy = nullptr;
++    NetDevice::DoDispose();
++}
++
++/********************************************
++ * Private members inherited from NetDevice *
++ ********************************************/
++
++Ptr<Channel>
++CluesNetDevice::GetChannel() const
++{
++    return nullptr;
++}
++
++void
++CluesNetDevice::SetIfIndex(const uint32_t index)
++{
++}
++
++uint32_t
++CluesNetDevice::GetIfIndex() const
++{
++    return 0;
++}
++
++void
++CluesNetDevice::SetAddress(Address address)
++{
++}
++
++Address
++CluesNetDevice::GetAddress() const
++{
++    return Address();
++}
++
++bool
++CluesNetDevice::SetMtu(const uint16_t mtu)
++{
++    return false;
++}
++
++uint16_t
++CluesNetDevice::GetMtu() const
++{
++    return 0;
++}
++
++bool
++CluesNetDevice::IsLinkUp() const
++{
++    return false;
++}
++
++void
++CluesNetDevice::AddLinkChangeCallback(Callback<void> callback)
++{
++}
++
++bool
++CluesNetDevice::IsBroadcast() const
++{
++    return false;
++}
++
++Address
++CluesNetDevice::GetBroadcast() const
++{
++    return Address();
++}
++
++bool
++CluesNetDevice::IsMulticast() const
++{
++    return false;
++}
++
++Address
++CluesNetDevice::GetMulticast(Ipv4Address multicastGroup) const
++{
++    return Address();
++}
++
++Address
++CluesNetDevice::GetMulticast(Ipv6Address addr) const
++{
++    return Address();
++}
++
++bool
++CluesNetDevice::IsBridge() const
++{
++    return false;
++}
++
++bool
++CluesNetDevice::IsPointToPoint() const
++{
++    return false;
++}
++
++bool
++CluesNetDevice::Send(Ptr<Packet> packet, const Address& dest, uint16_t protocolNumber)
++{
++    return false;
++}
++
++bool
++CluesNetDevice::SendFrom(Ptr<Packet> packet,
++                         const Address& source,
++                         const Address& dest,
++                         uint16_t protocolNumber)
++{
++    return false;
++}
++
++bool
++CluesNetDevice::NeedsArp() const
++{
++    return false;
++}
++
++void
++CluesNetDevice::SetPromiscReceiveCallback(PromiscReceiveCallback cb)
++{
++}
++
++bool
++CluesNetDevice::SupportsSendFrom() const
++{
++    return false;
++}
++
++} // namespace lorawan
++} // namespace ns3
+diff --git a/model/clues-net-device.h b/model/clues-net-device.h
+new file mode 100644
+index 0000000..d239479
+--- /dev/null
++++ b/model/clues-net-device.h
+@@ -0,0 +1,144 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#ifndef CLUES_NET_DEVICE_H
++#define CLUES_NET_DEVICE_H
++
++#include "ns3/lora-phy.h"
++#include "ns3/net-device.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++/**
++ * \ingroup lorawan
++ *
++ * Manages PHY layer of CLUES devices.
++ */
++class CluesNetDevice : public NetDevice
++{
++  public:
++    static const inline std::vector<uint8_t> m_spreadingFactors =
++        {12, 11, 10, 9, 8, 7}; //!< vector of possible sf values
++    static const inline std::vector<uint8_t> m_powerValuesDBm =
++        {14, 12, 10, 8, 6, 4, 2, 0}; //!< vector of possible tx power values
++    static const inline std::vector<double> m_frequenciesMHz = {
++        868.1,
++        868.3,
++        868.5,
++        867.1,
++        867.3,
++        867.5,
++        867.7,
++        867.9}; //!< vector of possible frequency values
++
++    /**
++     *  Register this type.
++     *  \return The object TypeId.
++     */
++    static TypeId GetTypeId();
++    ~CluesNetDevice() override; //!< Destructor
++
++    /**
++     * Send a packet through the LoRa PHY layer.
++     *
++     * \param packet The packet to send.
++     */
++    virtual void Send(Ptr<Packet> packet) = 0;
++
++    /**
++     * Callback used by the PHY layer to signal a TX end.
++     *
++     * \param packet The packet transmitted.
++     */
++    virtual void TxFinished(Ptr<const Packet> packet);
++
++    /**
++     * Callback used by the PHY layer to signal a successful packet reception.
++     *
++     * \param packet The packet received.
++     */
++    virtual void Receive(Ptr<const Packet> packet);
++
++    /**
++     * Set which LoraPhy instance is linked to this device.
++     *
++     * \param phy The PHY layer to use.
++     */
++    void SetPhy(Ptr<LoraPhy> phy);
++
++    /**
++     * Get the LoraPhy instance that is linked to this NetDevice.
++     *
++     * \return The PHY we are currently using.
++     */
++    Ptr<LoraPhy> GetPhy() const;
++
++    void SetNode(Ptr<Node> node) override;
++
++    Ptr<Node> GetNode() const override;
++
++    void SetReceiveCallback(NetDevice::ReceiveCallback cb) override;
++
++  protected:
++    void DoDispose() override;
++
++    // Member variables
++    Ptr<Node> m_node;   //!< The Node this NetDevice is connected to.
++    Ptr<LoraPhy> m_phy; //!< The LoraPhy this NetDevice is connected to.
++
++    /**
++     * Upper layer callback used for notification of new data packet arrivals.
++     */
++    NetDevice::ReceiveCallback m_receiveCallback;
++
++  private:
++    // Inherited pure virtual functions
++    void SetIfIndex(const uint32_t index) override;
++    uint32_t GetIfIndex() const override;
++    Ptr<Channel> GetChannel() const override;
++    void SetAddress(Address address) override;
++    Address GetAddress() const override;
++    bool SetMtu(const uint16_t mtu) override;
++    uint16_t GetMtu() const override;
++    bool IsLinkUp() const override;
++    void AddLinkChangeCallback(Callback<void> callback) override;
++    bool IsBroadcast() const override;
++    Address GetBroadcast() const override;
++    bool IsMulticast() const override;
++    Address GetMulticast(Ipv4Address multicastGroup) const override;
++    Address GetMulticast(Ipv6Address addr) const override;
++    bool IsBridge() const override;
++    bool IsPointToPoint() const override;
++    bool Send(Ptr<Packet> packet, const Address& dest, uint16_t protocolNumber) override;
++    bool SendFrom(Ptr<Packet> packet,
++                  const Address& source,
++                  const Address& dest,
++                  uint16_t protocolNumber) override;
++    bool NeedsArp() const override;
++    void SetPromiscReceiveCallback(PromiscReceiveCallback cb) override;
++    bool SupportsSendFrom() const override;
++};
++
++} // namespace lorawan
++} // namespace ns3
++
++#endif /* CLUES_NET_DEVICE_H */
+diff --git a/model/end-device-lora-phy.cc b/model/end-device-lora-phy.cc
+index 31e3b12..f2ea8cc 100644
+--- a/model/end-device-lora-phy.cc
++++ b/model/end-device-lora-phy.cc
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "end-device-lora-phy.h"
+@@ -46,26 +47,13 @@ EndDeviceLoraPhyListener::~EndDeviceLoraPhyListener()
+ TypeId
+ EndDeviceLoraPhy::GetTypeId()
+ {
+-    static TypeId tid =
+-        TypeId("ns3::EndDeviceLoraPhy")
+-            .SetParent<LoraPhy>()
+-            .SetGroupName("lorawan")
+-            .AddTraceSource("LostPacketBecauseWrongFrequency",
+-                            "Trace source indicating a packet "
+-                            "could not be correctly decoded because"
+-                            "the end device was listening on a different frequency",
+-                            MakeTraceSourceAccessor(&EndDeviceLoraPhy::m_wrongFrequency),
+-                            "ns3::Packet::TracedCallback")
+-            .AddTraceSource("LostPacketBecauseWrongSpreadingFactor",
+-                            "Trace source indicating a packet "
+-                            "could not be correctly decoded because"
+-                            "the end device was listening for a different Spreading Factor",
+-                            MakeTraceSourceAccessor(&EndDeviceLoraPhy::m_wrongSf),
+-                            "ns3::Packet::TracedCallback")
+-            .AddTraceSource("EndDeviceState",
+-                            "The current state of the device",
+-                            MakeTraceSourceAccessor(&EndDeviceLoraPhy::m_state),
+-                            "ns3::TracedValueCallback::EndDeviceLoraPhy::State");
++    static TypeId tid = TypeId("ns3::EndDeviceLoraPhy")
++                            .SetParent<LoraPhy>()
++                            .SetGroupName("lorawan")
++                            .AddTraceSource("EndDeviceState",
++                                            "The current state of the device",
++                                            MakeTraceSourceAccessor(&EndDeviceLoraPhy::m_state),
++                                            "ns3::TracedValueCallback::EndDeviceLoraPhy::State");
+     return tid;
+ }
+ 
+@@ -111,6 +99,19 @@ EndDeviceLoraPhy::IsOnFrequency(double frequencyMHz)
+     return m_frequency == frequencyMHz;
+ }
+ 
++bool
++EndDeviceLoraPhy::IsOnSF(uint8_t sf)
++{
++    return m_sf == sf;
++}
++
++double
++EndDeviceLoraPhy::GetSensitivity(uint8_t sf)
++{
++    NS_ASSERT(sf >= 7 && sf <= 12);
++    return sensitivity[sf - 7];
++}
++
+ void
+ EndDeviceLoraPhy::SetFrequency(double frequencyMHz)
+ {
+diff --git a/model/end-device-lora-phy.h b/model/end-device-lora-phy.h
+index 847e39a..f0aaad2 100644
+--- a/model/end-device-lora-phy.h
++++ b/model/end-device-lora-phy.h
+@@ -17,6 +17,7 @@
+  * Authors: Davide Magrin <magrinda@dei.unipd.it>,
+  *          Michele Luvisotto <michele.luvisotto@dei.unipd.it>
+  *          Stefano Romagnolo <romagnolostefano93@gmail.com>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #ifndef END_DEVICE_LORA_PHY_H
+@@ -168,11 +169,17 @@ class EndDeviceLoraPhy : public LoraPhy
+               double frequencyMHz,
+               double txPowerDbm) override = 0;
+ 
++    // Implementation of LoraPhy's pure virtual functions
++    bool IsTransmitting() override;
++
+     // Implementation of LoraPhy's pure virtual functions
+     bool IsOnFrequency(double frequencyMHz) override;
+ 
+     // Implementation of LoraPhy's pure virtual functions
+-    bool IsTransmitting() override;
++    bool IsOnSF(uint8_t sf) override;
++
++    // Implementation of LoraPhy's pure virtual functions
++    double GetSensitivity(uint8_t sf) override;
+ 
+     /**
+      * Set the frequency this end device will listen on.
+@@ -249,19 +256,6 @@ class EndDeviceLoraPhy : public LoraPhy
+      */
+     void SwitchToTx(double txPowerDbm);
+ 
+-    /**
+-     * Trace source for when a packet is lost because it was using a spreading factor different from
+-     * the one this EndDeviceLoraPhy was configured to listen for.
+-     */
+-    TracedCallback<Ptr<const Packet>, uint32_t> m_wrongSf;
+-
+-    /**
+-     * Trace source for when a packet is lost because it was transmitted on a
+-     * frequency different from the one this EndDeviceLoraPhy was configured to
+-     * listen on.
+-     */
+-    TracedCallback<Ptr<const Packet>, uint32_t> m_wrongFrequency;
+-
+     TracedValue<State> m_state; //!< The state this PHY is currently in.
+ 
+     // static const double sensitivity[6]; //!< The sensitivity vector of this device to different
+diff --git a/model/gateway-lora-phy.cc b/model/gateway-lora-phy.cc
+index 1a75706..fb69783 100644
+--- a/model/gateway-lora-phy.cc
++++ b/model/gateway-lora-phy.cc
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "gateway-lora-phy.h"
+@@ -106,19 +107,6 @@ GatewayLoraPhy::GetTypeId()
+         TypeId("ns3::GatewayLoraPhy")
+             .SetParent<LoraPhy>()
+             .SetGroupName("lorawan")
+-            .AddTraceSource(
+-                "NoReceptionBecauseTransmitting",
+-                "Trace source indicating a packet "
+-                "could not be correctly received because"
+-                "the gateway is in transmission mode",
+-                MakeTraceSourceAccessor(&GatewayLoraPhy::m_noReceptionBecauseTransmitting),
+-                "ns3::Packet::TracedCallback")
+-            .AddTraceSource("LostPacketBecauseNoMoreReceivers",
+-                            "Trace source indicating a packet "
+-                            "could not be correctly received because"
+-                            "there are no more demodulators available",
+-                            MakeTraceSourceAccessor(&GatewayLoraPhy::m_noMoreDemodulators),
+-                            "ns3::Packet::TracedCallback")
+             .AddTraceSource("OccupiedReceptionPaths",
+                             "Number of currently occupied reception paths",
+                             MakeTraceSourceAccessor(&GatewayLoraPhy::m_occupiedReceptionPaths),
+@@ -173,9 +161,14 @@ void
+ GatewayLoraPhy::AddFrequency(double frequencyMHz)
+ {
+     NS_LOG_FUNCTION(this << frequencyMHz);
+-
++    for (const auto& f : m_frequencies)
++    {
++        if (f == frequencyMHz)
++        {
++            return;
++        }
++    }
+     m_frequencies.push_back(frequencyMHz);
+-
+     NS_ASSERT(m_frequencies.size() <= 8);
+ }
+ 
+@@ -194,5 +187,19 @@ GatewayLoraPhy::IsOnFrequency(double frequencyMHz)
+     }
+     return false;
+ }
++
++bool
++GatewayLoraPhy::IsOnSF(uint8_t sf)
++{
++    return true; // always true in SX1301 gateways
++}
++
++double
++GatewayLoraPhy::GetSensitivity(uint8_t sf)
++{
++    NS_ASSERT(sf >= 7 && sf <= 12);
++    return sensitivity[sf - 7];
++}
++
+ } // namespace lorawan
+ } // namespace ns3
+diff --git a/model/gateway-lora-phy.h b/model/gateway-lora-phy.h
+index 57d47e2..6935dfd 100644
+--- a/model/gateway-lora-phy.h
++++ b/model/gateway-lora-phy.h
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #ifndef GATEWAY_LORA_PHY_H
+@@ -82,6 +83,7 @@ class GatewayLoraPhy : public LoraPhy
+      */
+     virtual void TxFinished(Ptr<Packet> packet);
+ 
++    // Implementation of LoraPhy's pure virtual functions
+     bool IsTransmitting() override;
+ 
+     /**
+@@ -92,6 +94,12 @@ class GatewayLoraPhy : public LoraPhy
+      */
+     bool IsOnFrequency(double frequencyMHz) override;
+ 
++    // Implementation of LoraPhy's pure virtual functions
++    bool IsOnSF(uint8_t sf) override;
++
++    // Implementation of LoraPhy's pure virtual functions
++    double GetSensitivity(uint8_t sf) override;
++
+     /**
+      * Add a reception path, locked on a specific frequency.
+      */
+@@ -199,18 +207,6 @@ class GatewayLoraPhy : public LoraPhy
+ 
+     TracedValue<int> m_occupiedReceptionPaths; //!< The number of occupied reception paths.
+ 
+-    /**
+-     * Trace source fired when a packet cannot be received because all available ReceivePath
+-     * instances are busy.
+-     */
+-    TracedCallback<Ptr<const Packet>, uint32_t> m_noMoreDemodulators;
+-
+-    /**
+-     * Trace source fired when a packet cannot be received because the gateway is in transmission
+-     * state.
+-     */
+-    TracedCallback<Ptr<const Packet>, uint32_t> m_noReceptionBecauseTransmitting;
+-
+     bool m_isTransmitting; //!< Flag indicating whether a transmission is going on
+ 
+     std::list<double> m_frequencies; //!< List of frequencies the GatewayLoraPhy is listening to.
+diff --git a/model/lora-application.cc b/model/lora-application.cc
+new file mode 100644
+index 0000000..112619d
+--- /dev/null
++++ b/model/lora-application.cc
+@@ -0,0 +1,168 @@
++/*
++ * Copyright (c) 2022 Orange SA
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "lora-application.h"
++
++#include "ns3/lora-net-device.h"
++#include "ns3/uinteger.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++NS_LOG_COMPONENT_DEFINE("LoraApplication");
++
++NS_OBJECT_ENSURE_REGISTERED(LoraApplication);
++
++TypeId
++LoraApplication::GetTypeId()
++{
++    static TypeId tid =
++        TypeId("ns3::LoraApplication")
++            .SetParent<Application>()
++            .AddConstructor<LoraApplication>()
++            .SetGroupName("lorawan")
++            .AddAttribute("Interval",
++                          "The average time to wait between packets",
++                          TimeValue(Seconds(600)),
++                          MakeTimeAccessor(&LoraApplication::m_avgInterval),
++                          MakeTimeChecker())
++            .AddAttribute("PacketSize",
++                          "Size of packets generated. The minimum packet size is 12 bytes which is "
++                          "the size of the header carrying the sequence number and the time stamp.",
++                          UintegerValue(18),
++                          MakeUintegerAccessor(&LoraApplication::m_basePktSize),
++                          MakeUintegerChecker<uint8_t>());
++    return tid;
++}
++
++LoraApplication::LoraApplication()
++    : m_avgInterval(Seconds(600)),
++      m_initialDelay(Seconds(0)),
++      m_sendEvent(EventId()),
++      m_basePktSize(18),
++      m_dev(nullptr)
++
++{
++    NS_LOG_FUNCTION(this);
++}
++
++LoraApplication::~LoraApplication()
++{
++    NS_LOG_FUNCTION(this);
++}
++
++void
++LoraApplication::SetInterval(Time interval)
++{
++    NS_LOG_FUNCTION(this << interval);
++    m_avgInterval = interval;
++}
++
++Time
++LoraApplication::GetInterval() const
++{
++    NS_LOG_FUNCTION(this);
++    return m_avgInterval;
++}
++
++void
++LoraApplication::SetInitialDelay(Time delay)
++{
++    NS_LOG_FUNCTION(this << delay);
++    m_initialDelay = delay;
++}
++
++void
++LoraApplication::SetPacketSize(uint8_t size)
++{
++    NS_LOG_FUNCTION(this << (unsigned)size);
++    m_basePktSize = size;
++}
++
++uint8_t
++LoraApplication::GetPacketSize() const
++{
++    NS_LOG_FUNCTION(this);
++    return m_basePktSize;
++}
++
++bool
++LoraApplication::IsRunning()
++{
++    NS_LOG_FUNCTION(this);
++    return m_sendEvent.IsRunning();
++}
++
++void
++LoraApplication::DoInitialize()
++{
++    NS_LOG_FUNCTION(this);
++    // look for net device if not manually installed
++    if (!m_dev)
++    {
++        // Require exactly one CluesNetDevice installed on this node
++        Ptr<SensorNetDevice> dev = nullptr;
++        uint32_t i = 0;
++        for (; i < m_node->GetNDevices() && !m_dev; ++i)
++        {
++            m_dev = DynamicCast<SensorNetDevice>(m_node->GetDevice(i));
++        }
++        NS_ABORT_MSG_UNLESS(m_dev, "One SensorNetDevice must be installed on this node");
++        for (; i < m_node->GetNDevices(); ++i)
++        {
++            NS_ABORT_MSG_IF(DynamicCast<SensorNetDevice>(m_node->GetDevice(i)),
++                            "No more than one SensorNetDevice must be installed on this node");
++        }
++    }
++    Application::DoInitialize();
++}
++
++void
++LoraApplication::DoDispose()
++{
++    NS_LOG_FUNCTION(this);
++    m_dev = nullptr;
++    Application::DoDispose();
++}
++
++// Protected methods
++// StartApp, StopApp and Send will likely be overridden by lora application subclasses
++void
++LoraApplication::StartApplication()
++{ // Provide null functionality in case subclass is not interested
++    NS_LOG_FUNCTION(this);
++}
++
++void
++LoraApplication::StopApplication()
++{
++    NS_LOG_FUNCTION_NOARGS();
++    m_sendEvent.Cancel();
++}
++
++void
++LoraApplication::SendPacket()
++{ // Provide null functionality in case subclass is not interested
++    NS_LOG_FUNCTION(this);
++}
++
++} // namespace lorawan
++} // namespace ns3
+diff --git a/model/lora-application.h b/model/lora-application.h
+new file mode 100644
+index 0000000..83c506b
+--- /dev/null
++++ b/model/lora-application.h
+@@ -0,0 +1,122 @@
++/*
++ * Copyright (c) 2022 Orange SA
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#ifndef LORA_APPLICATION_H
++#define LORA_APPLICATION_H
++
++#include "ns3/application.h"
++#include "ns3/sensor-net-device.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++class LoraApplication : public Application
++{
++  public:
++    /**
++     * \brief Get the type ID.
++     * \return the object TypeId
++     */
++    static TypeId GetTypeId();
++    LoraApplication();
++    ~LoraApplication() override;
++
++    /**
++     * Set the sending interval
++     * \param interval the interval between two packet sendings
++     */
++    void SetInterval(Time interval);
++
++    /**
++     * Get the sending inteval
++     * \returns the interval between two packet sends
++     */
++    Time GetInterval() const;
++
++    /**
++     * Set the initial delay of this application
++     */
++    void SetInitialDelay(Time delay);
++
++    /**
++     * Set packet size
++     */
++    void SetPacketSize(uint8_t size);
++
++    /**
++     * Get packet size
++     */
++    uint8_t GetPacketSize() const;
++
++    /**
++     * True if the application is currently running
++     */
++    bool IsRunning();
++
++  protected:
++    void DoInitialize() override;
++    void DoDispose() override;
++
++    /**
++     * Start the application by scheduling the first SendPacket event
++     */
++    void StartApplication() override;
++
++    /**
++     * Stop the application
++     */
++    void StopApplication() override;
++
++    /**
++     * Send a packet using the LoraNetDevice's Send method
++     */
++    virtual void SendPacket();
++
++    /**
++     * The average interval between to consecutive send events
++     */
++    Time m_avgInterval;
++
++    /**
++     * The initial delay of this application
++     */
++    Time m_initialDelay;
++
++    /**
++     * The sending event scheduled as next
++     */
++    EventId m_sendEvent;
++
++    /**
++     * The packet size.
++     */
++    uint8_t m_basePktSize;
++
++    /**
++     * The SensorNetDevice of this node
++     */
++    Ptr<SensorNetDevice> m_dev;
++};
++
++} // namespace lorawan
++
++} // namespace ns3
++#endif /* LORA_APPLICATION_H */
+diff --git a/model/lora-gateway-net-device.cc b/model/lora-gateway-net-device.cc
+new file mode 100644
+index 0000000..67d3674
+--- /dev/null
++++ b/model/lora-gateway-net-device.cc
+@@ -0,0 +1,73 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "lora-gateway-net-device.h"
++
++#include "ns3/end-device-lora-phy.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++NS_LOG_COMPONENT_DEFINE("LoraGatewayNetDevice");
++
++NS_OBJECT_ENSURE_REGISTERED(LoraGatewayNetDevice);
++
++TypeId
++LoraGatewayNetDevice::GetTypeId()
++{
++    static TypeId tid = TypeId("ns3::LoraGatewayNetDevice")
++                            .SetParent<CluesNetDevice>()
++                            .AddConstructor<LoraGatewayNetDevice>()
++                            .SetGroupName("lorawan");
++    return tid;
++}
++
++LoraGatewayNetDevice::LoraGatewayNetDevice()
++{
++    NS_LOG_FUNCTION(this);
++}
++
++LoraGatewayNetDevice::~LoraGatewayNetDevice()
++{
++    NS_LOG_FUNCTION(this);
++}
++
++void
++LoraGatewayNetDevice::Send(Ptr<Packet> packet)
++{
++    NS_LOG_FUNCTION(this << packet);
++    // Do nothing by default
++}
++
++void
++LoraGatewayNetDevice::DoInitialize()
++{
++    NS_LOG_FUNCTION(this);
++    NS_ASSERT(m_phy);
++    if (auto phy = DynamicCast<EndDeviceLoraPhy>(m_phy); phy)
++    {
++        phy->SwitchToStandby(); // Continuous Rx
++    }
++    CluesNetDevice::DoInitialize();
++}
++
++} // namespace lorawan
++} // namespace ns3
+diff --git a/model/lora-gateway-net-device.h b/model/lora-gateway-net-device.h
+new file mode 100644
+index 0000000..c8e2c07
+--- /dev/null
++++ b/model/lora-gateway-net-device.h
+@@ -0,0 +1,58 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#ifndef LORA_GATEWAY_NET_DEVICE_H
++#define LORA_GATEWAY_NET_DEVICE_H
++
++#include "ns3/clues-net-device.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++/**
++ * \ingroup lorawan
++ *
++ * Manages PHY layer of either a CLUES Smart Home Gateway device or of a Classical Gateway.
++ */
++class LoraGatewayNetDevice : public CluesNetDevice
++{
++  public:
++    /**
++     *  Register this type.
++     *  \return The object TypeId.
++     */
++    static TypeId GetTypeId();
++
++    LoraGatewayNetDevice();           //!< Default constructor
++    ~LoraGatewayNetDevice() override; //!< Destructor
++
++    void Send(Ptr<Packet> packet) override;
++
++  protected:
++    void DoInitialize() override;
++
++  private:
++};
++
++} // namespace lorawan
++} // namespace ns3
++
++#endif /* LORA_GATEWAY_NET_DEVICE_H */
+diff --git a/model/lora-phy.cc b/model/lora-phy.cc
+index 88ab04b..08a0c7f 100644
+--- a/model/lora-phy.cc
++++ b/model/lora-phy.cc
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "lora-phy.h"
+@@ -67,12 +68,37 @@ LoraPhy::GetTypeId()
+                             "signals",
+                             MakeTraceSourceAccessor(&LoraPhy::m_interferedPacket),
+                             "ns3::Packet::TracedCallback")
++            .AddTraceSource("NoReceptionBecauseTransmitting",
++                            "Trace source indicating a packet "
++                            "could not be correctly received because"
++                            "the device is in transmission mode",
++                            MakeTraceSourceAccessor(&LoraPhy::m_noReceptionBecauseTransmitting),
++                            "ns3::Packet::TracedCallback")
++            .AddTraceSource("LostPacketBecauseWrongFrequency",
++                            "Trace source indicating a packet "
++                            "could not be correctly decoded because"
++                            "the device was listening on a different frequency",
++                            MakeTraceSourceAccessor(&LoraPhy::m_wrongFrequency),
++                            "ns3::Packet::TracedCallback")
++            .AddTraceSource("LostPacketBecauseWrongSpreadingFactor",
++                            "Trace source indicating a packet "
++                            "could not be correctly decoded because"
++                            "the device was listening for a different Spreading Factor",
++                            MakeTraceSourceAccessor(&LoraPhy::m_wrongSf),
++                            "ns3::Packet::TracedCallback")
++            .AddTraceSource("LostPacketBecauseNoMoreReceivers",
++                            "Trace source indicating a packet "
++                            "could not be correctly received because"
++                            "there are no more demodulators available",
++                            MakeTraceSourceAccessor(&LoraPhy::m_noMoreDemodulators),
++                            "ns3::Packet::TracedCallback")
+             .AddTraceSource("LostPacketBecauseUnderSensitivity",
+                             "Trace source indicating a packet "
+                             "could not be correctly received because"
+                             "its received power is below the sensitivity of the receiver",
+                             MakeTraceSourceAccessor(&LoraPhy::m_underSensitivity),
+                             "ns3::Packet::TracedCallback");
++
+     return tid;
+ }
+ 
+diff --git a/model/lora-phy.h b/model/lora-phy.h
+index 241d7a6..ed6ff69 100644
+--- a/model/lora-phy.h
++++ b/model/lora-phy.h
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #ifndef LORA_PHY_H
+@@ -170,6 +171,22 @@ class LoraPhy : public Object
+      */
+     virtual bool IsOnFrequency(double frequency) = 0;
+ 
++    /**
++     * Whether this device is listening on the specified SF or not.
++     *
++     * \param sf The SF to query.
++     * \return True if the device is listening on that SF, false otherwise.
++     */
++    virtual bool IsOnSF(uint8_t sf) = 0;
++
++    /**
++     * Obtain this device reception power sensitivity for a spreading factor.
++     *
++     * \param sf The reference spreading factor.
++     * \return The reception power sensitivity [dBm].
++     */
++    virtual double GetSensitivity(uint8_t sf) = 0;
++
+     /**
+      * Set the callback to call upon successful reception of a packet.
+      *
+@@ -302,18 +319,42 @@ class LoraPhy : public Object
+      */
+     TracedCallback<Ptr<const Packet>, uint32_t> m_successfullyReceivedPacket;
+ 
+-    /**
+-     * The trace source fired when a packet cannot be received because its power
+-     * is below the sensitivity threshold.
+-     */
+-    TracedCallback<Ptr<const Packet>, uint32_t> m_underSensitivity;
+-
+     /**
+      * The trace source fired when a packet cannot be correctly received because
+      * of interference.
+      */
+     TracedCallback<Ptr<const Packet>, uint32_t> m_interferedPacket;
+ 
++    /**
++     * Trace source fired when a packet cannot be received because the device is in transmission
++     * state.
++     */
++    TracedCallback<Ptr<const Packet>, uint32_t> m_noReceptionBecauseTransmitting;
++
++    /**
++     * Trace source for when a packet is lost because it was using a spreading factor different from
++     * the one this device was configured to listen for.
++     */
++    TracedCallback<Ptr<const Packet>, uint32_t> m_wrongSf;
++
++    /**
++     * Trace source for when a packet is lost because it was transmitted on a frequency different
++     * from the one this device was configured to listen on.
++     */
++    TracedCallback<Ptr<const Packet>, uint32_t> m_wrongFrequency;
++
++    /**
++     * Trace source fired when a packet cannot be received because all available ReceivePath
++     * instances are busy.
++     */
++    TracedCallback<Ptr<const Packet>, uint32_t> m_noMoreDemodulators;
++
++    /**
++     * The trace source fired when a packet cannot be received because its power
++     * is below the sensitivity threshold.
++     */
++    TracedCallback<Ptr<const Packet>, uint32_t> m_underSensitivity;
++
+     // Callbacks
+ 
+     /**
+diff --git a/model/lora-radio-energy-model.cc b/model/lora-radio-energy-model.cc
+index 911ea81..c1d2681 100644
+--- a/model/lora-radio-energy-model.cc
++++ b/model/lora-radio-energy-model.cc
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Romagnolo Stefano <romagnolostefano93@gmail.com>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "lora-radio-energy-model.h"
+@@ -43,25 +44,25 @@ LoraRadioEnergyModel::GetTypeId()
+             .AddConstructor<LoraRadioEnergyModel>()
+             .AddAttribute("StandbyCurrentA",
+                           "The default radio Standby current in Ampere.",
+-                          DoubleValue(0.0014), // idle mode = 1.4mA
++                          DoubleValue(0.0014), // standby mode = 1.4mA
+                           MakeDoubleAccessor(&LoraRadioEnergyModel::SetStandbyCurrentA,
+                                              &LoraRadioEnergyModel::GetStandbyCurrentA),
+                           MakeDoubleChecker<double>())
+             .AddAttribute("TxCurrentA",
+                           "The radio Tx current in Ampere.",
+-                          DoubleValue(0.028), // transmit at 0dBm = 28mA
++                          DoubleValue(0.028), // transmit at 13dBm = 28mA
+                           MakeDoubleAccessor(&LoraRadioEnergyModel::SetTxCurrentA,
+                                              &LoraRadioEnergyModel::GetTxCurrentA),
+                           MakeDoubleChecker<double>())
+             .AddAttribute("RxCurrentA",
+                           "The radio Rx current in Ampere.",
+-                          DoubleValue(0.0112), // receive mode = 11.2mA
++                          DoubleValue(0.0105), // receive mode = 10.5mA
+                           MakeDoubleAccessor(&LoraRadioEnergyModel::SetRxCurrentA,
+                                              &LoraRadioEnergyModel::GetRxCurrentA),
+                           MakeDoubleChecker<double>())
+             .AddAttribute("SleepCurrentA",
+                           "The radio Sleep current in Ampere.",
+-                          DoubleValue(0.0000015), // sleep mode = 1.5microA
++                          DoubleValue(0.0000015), // sleep mode = 1.5μA
+                           MakeDoubleAccessor(&LoraRadioEnergyModel::SetSleepCurrentA,
+                                              &LoraRadioEnergyModel::GetSleepCurrentA),
+                           MakeDoubleChecker<double>())
+diff --git a/model/lora-radio-energy-model.h b/model/lora-radio-energy-model.h
+index 9336394..3c9b37e 100644
+--- a/model/lora-radio-energy-model.h
++++ b/model/lora-radio-energy-model.h
+@@ -16,6 +16,7 @@
+  *
+  * Authors: Romagnolo Stefano <romagnolostefano93@gmail.com>
+  *          Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #ifndef LORA_RADIO_ENERGY_MODEL_H
+@@ -160,7 +161,7 @@ class LoraRadioEnergyModel : public DeviceEnergyModel
+     void SetEnergySource(Ptr<EnergySource> source) override;
+ 
+     /**
+-     * \return Total energy consumption of the wifi device.
++     * \return Total energy consumption of the LoRa device.
+      *
+      * Implements DeviceEnergyModel::GetTotalEnergyConsumption.
+      */
+diff --git a/model/lora-tx-current-model.cc b/model/lora-tx-current-model.cc
+index 586c4c8..f049711 100644
+--- a/model/lora-tx-current-model.cc
++++ b/model/lora-tx-current-model.cc
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Romagnolo Stefano <romagnolostefano93@gmail.com>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "lora-tx-current-model.h"
+@@ -61,7 +62,7 @@ LinearLoraTxCurrentModel::GetTypeId()
+             .AddConstructor<LinearLoraTxCurrentModel>()
+             .AddAttribute("Eta",
+                           "The efficiency of the power amplifier.",
+-                          DoubleValue(0.10),
++                          DoubleValue(0.452750024649), // see class description for more info
+                           MakeDoubleAccessor(&LinearLoraTxCurrentModel::SetEta,
+                                              &LinearLoraTxCurrentModel::GetEta),
+                           MakeDoubleChecker<double>())
+@@ -71,11 +72,11 @@ LinearLoraTxCurrentModel::GetTypeId()
+                           MakeDoubleAccessor(&LinearLoraTxCurrentModel::SetVoltage,
+                                              &LinearLoraTxCurrentModel::GetVoltage),
+                           MakeDoubleChecker<double>())
+-            .AddAttribute("StandbyCurrent",
+-                          "The current in the STANDBY state (in Watts).",
+-                          DoubleValue(0.0014), // idle mode = 1.4mA
+-                          MakeDoubleAccessor(&LinearLoraTxCurrentModel::SetStandbyCurrent,
+-                                             &LinearLoraTxCurrentModel::GetStandbyCurrent),
++            .AddAttribute("BaseCurrent",
++                          "The TX baseline current (in Ampere).",
++                          DoubleValue(0.0146455016894), // see class description for more info
++                          MakeDoubleAccessor(&LinearLoraTxCurrentModel::SetBaseCurrent,
++                                             &LinearLoraTxCurrentModel::GetBaseCurrent),
+                           MakeDoubleChecker<double>());
+     return tid;
+ }
+@@ -105,7 +106,7 @@ LinearLoraTxCurrentModel::SetVoltage(double voltage)
+ }
+ 
+ void
+-LinearLoraTxCurrentModel::SetStandbyCurrent(double idleCurrent)
++LinearLoraTxCurrentModel::SetBaseCurrent(double idleCurrent)
+ {
+     NS_LOG_FUNCTION(this << idleCurrent);
+     m_idleCurrent = idleCurrent;
+@@ -124,7 +125,7 @@ LinearLoraTxCurrentModel::GetVoltage() const
+ }
+ 
+ double
+-LinearLoraTxCurrentModel::GetStandbyCurrent() const
++LinearLoraTxCurrentModel::GetBaseCurrent() const
+ {
+     return m_idleCurrent;
+ }
+@@ -148,7 +149,7 @@ ConstantLoraTxCurrentModel::GetTypeId()
+             .AddConstructor<ConstantLoraTxCurrentModel>()
+             .AddAttribute("TxCurrent",
+                           "The radio Tx current in Ampere.",
+-                          DoubleValue(0.028), // transmit at 0dBm = 28mA
++                          DoubleValue(0.028), // transmit at 13dBm = 28mA
+                           MakeDoubleAccessor(&ConstantLoraTxCurrentModel::SetTxCurrent,
+                                              &ConstantLoraTxCurrentModel::GetTxCurrent),
+                           MakeDoubleChecker<double>());
+diff --git a/model/lora-tx-current-model.h b/model/lora-tx-current-model.h
+index 61b68da..7cdf568 100644
+--- a/model/lora-tx-current-model.h
++++ b/model/lora-tx-current-model.h
+@@ -16,6 +16,7 @@
+  *
+  * Authors: Romagnolo Stefano <romagnolostefano93@gmail.com>
+  *          Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #ifndef LORA_TX_CURRENT_MODEL_H
+@@ -58,8 +59,9 @@ class LoraTxCurrentModel : public Object
+ /**
+  * \ingroup lorawan
+  *
+- * A linear model of the transmission current for a LoRa device, based on the
+- * WiFi model.
++ * A linear model of the transmission current for a LoRa device, based on the WiFi model. Default
++ * values are obtained by line interpolation of the (7dBm, 18mA) and (13dBm, 28mA) values for TX
++ * power (converted to Watt) and respective current found in the SX1272 datasheet.
+  */
+ class LinearLoraTxCurrentModel : public LoraTxCurrentModel
+ {
+@@ -92,7 +94,7 @@ class LinearLoraTxCurrentModel : public LoraTxCurrentModel
+      *
+      * \param idleCurrent The idle current value [Ampere].
+      */
+-    void SetStandbyCurrent(double idleCurrent);
++    void SetBaseCurrent(double idleCurrent);
+ 
+     /**
+      * Get the power amplifier efficiency.
+@@ -113,7 +115,7 @@ class LinearLoraTxCurrentModel : public LoraTxCurrentModel
+      *
+      * \return The idle current value [Ampere].
+      */
+-    double GetStandbyCurrent() const;
++    double GetBaseCurrent() const;
+ 
+     double CalcTxCurrent(double txPowerDbm) const override;
+ 
+@@ -127,7 +129,8 @@ class LinearLoraTxCurrentModel : public LoraTxCurrentModel
+  * \ingroup lorawan
+  *
+  * A constant model of the transmission current for a LoRa device, always yielding the same
+- * current independently from the transmission power provided.
++ * current independently from the transmission power provided. The default value returned for
++ * current corresponds to a transmission power of 13dBm.
+  */
+ class ConstantLoraTxCurrentModel : public LoraTxCurrentModel
+ {
+diff --git a/model/periodic-sender.cc b/model/periodic-sender.cc
+index 9aa8d71..b34b9d9 100644
+--- a/model/periodic-sender.cc
++++ b/model/periodic-sender.cc
+@@ -15,16 +15,12 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "periodic-sender.h"
+ 
+-#include "lora-net-device.h"
+-
+-#include "ns3/double.h"
+-#include "ns3/log.h"
+-#include "ns3/pointer.h"
+-#include "ns3/string.h"
++#include "ns3/simulator.h"
+ 
+ namespace ns3
+ {
+@@ -39,110 +35,26 @@ TypeId
+ PeriodicSender::GetTypeId()
+ {
+     static TypeId tid = TypeId("ns3::PeriodicSender")
+-                            .SetParent<Application>()
++                            .SetParent<LoraApplication>()
+                             .AddConstructor<PeriodicSender>()
+-                            .SetGroupName("lorawan")
+-                            .AddAttribute("Interval",
+-                                          "The interval between packet sends of this app",
+-                                          TimeValue(Seconds(0)),
+-                                          MakeTimeAccessor(&PeriodicSender::GetInterval,
+-                                                           &PeriodicSender::SetInterval),
+-                                          MakeTimeChecker());
+-    // .AddAttribute ("PacketSizeRandomVariable", "The random variable that determines the shape of
+-    // the packet size, in bytes",
+-    //                StringValue ("ns3::UniformRandomVariable[Min=0,Max=10]"),
+-    //                MakePointerAccessor (&PeriodicSender::m_pktSizeRV),
+-    //                MakePointerChecker <RandomVariableStream>());
++                            .SetGroupName("lorawan");
+     return tid;
+ }
+ 
+ PeriodicSender::PeriodicSender()
+-    : m_interval(Seconds(10)),
+-      m_initialDelay(Seconds(1)),
+-      m_basePktSize(10),
+-      m_pktSizeRV(nullptr)
+-
+-{
+-    NS_LOG_FUNCTION_NOARGS();
+-}
+-
+-PeriodicSender::~PeriodicSender()
+-{
+-    NS_LOG_FUNCTION_NOARGS();
+-}
+-
+-void
+-PeriodicSender::SetInterval(Time interval)
+-{
+-    NS_LOG_FUNCTION(this << interval);
+-    m_interval = interval;
+-}
+-
+-Time
+-PeriodicSender::GetInterval() const
+ {
+     NS_LOG_FUNCTION(this);
+-    return m_interval;
+-}
+-
+-void
+-PeriodicSender::SetInitialDelay(Time delay)
+-{
+-    NS_LOG_FUNCTION(this << delay);
+-    m_initialDelay = delay;
+ }
+ 
+-void
+-PeriodicSender::SetPacketSizeRandomVariable(Ptr<RandomVariableStream> rv)
+-{
+-    m_pktSizeRV = rv;
+-}
+-
+-void
+-PeriodicSender::SetPacketSize(uint8_t size)
+-{
+-    m_basePktSize = size;
+-}
+-
+-void
+-PeriodicSender::SendPacket()
++PeriodicSender::~PeriodicSender()
+ {
+     NS_LOG_FUNCTION(this);
+-
+-    // Create and send a new packet
+-    Ptr<Packet> packet;
+-    if (m_pktSizeRV)
+-    {
+-        int randomsize = m_pktSizeRV->GetInteger();
+-        packet = Create<Packet>(m_basePktSize + randomsize);
+-    }
+-    else
+-    {
+-        packet = Create<Packet>(m_basePktSize);
+-    }
+-    m_mac->Send(packet);
+-
+-    // Schedule the next SendPacket event
+-    m_sendEvent = Simulator::Schedule(m_interval, &PeriodicSender::SendPacket, this);
+-
+-    NS_LOG_DEBUG("Sent a packet of size " << packet->GetSize());
+ }
+ 
+ void
+ PeriodicSender::StartApplication()
+ {
+     NS_LOG_FUNCTION(this);
+-
+-    // Make sure we have a MAC layer
+-    if (!m_mac)
+-    {
+-        // Assumes there's only one device
+-        Ptr<LoraNetDevice> loraNetDevice = m_node->GetDevice(0)->GetObject<LoraNetDevice>();
+-
+-        m_mac = loraNetDevice->GetMac();
+-        NS_ASSERT(m_mac);
+-    }
+-
+     // Schedule the next SendPacket event
+     Simulator::Cancel(m_sendEvent);
+     NS_LOG_DEBUG("Starting up application with a first event with a " << m_initialDelay.GetSeconds()
+@@ -152,10 +64,15 @@ PeriodicSender::StartApplication()
+ }
+ 
+ void
+-PeriodicSender::StopApplication()
++PeriodicSender::SendPacket()
+ {
+-    NS_LOG_FUNCTION_NOARGS();
+-    Simulator::Cancel(m_sendEvent);
++    NS_LOG_FUNCTION(this);
++    // Create and send a new packet
++    Ptr<Packet> packet = Create<Packet>(m_basePktSize);
++    m_dev->Send(packet);
++    // Schedule the next SendPacket event
++    m_sendEvent = Simulator::Schedule(m_avgInterval, &PeriodicSender::SendPacket, this);
++    NS_LOG_DEBUG("Sent a packet of size " << packet->GetSize());
+ }
+ 
+ } // namespace lorawan
+diff --git a/model/periodic-sender.h b/model/periodic-sender.h
+index 8df1518..a11eba8 100644
+--- a/model/periodic-sender.h
++++ b/model/periodic-sender.h
+@@ -15,103 +15,37 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #ifndef PERIODIC_SENDER_H
+ #define PERIODIC_SENDER_H
+ 
+-#include "lorawan-mac.h"
+-
+-#include "ns3/application.h"
+-#include "ns3/attribute.h"
+-#include "ns3/nstime.h"
++#include "ns3/lora-application.h"
+ 
+ namespace ns3
+ {
+ namespace lorawan
+ {
+ 
+-/**
+- * \ingroup lorawan
+- *
+- * Implements a sender application generating packets following a periodic point process.
+- */
+-class PeriodicSender : public Application
++class PeriodicSender : public LoraApplication
+ {
+   public:
+-    PeriodicSender();           //!< Default constructor
+-    ~PeriodicSender() override; //!< Destructor
++    PeriodicSender();
++    ~PeriodicSender() override;
+ 
+-    /**
+-     *  Register this type.
+-     *  \return The object TypeId.
+-     */
+     static TypeId GetTypeId();
+ 
++  private:
+     /**
+-     * Set the sending interval.
+-     *
+-     * \param interval The interval between two packet send instances.
+-     */
+-    void SetInterval(Time interval);
+-
+-    /**
+-     * Get the sending interval.
+-     *
+-     * \return The interval between two packet sends.
+-     */
+-    Time GetInterval() const;
+-
+-    /**
+-     * Set the initial delay of this application.
+-     *
+-     * \param delay The initial delay value.
+-     */
+-    void SetInitialDelay(Time delay);
+-
+-    /**
+-     * Set packet size.
+-     *
+-     * \param size The base packet size value in bytes.
+-     */
+-    void SetPacketSize(uint8_t size);
+-
+-    /**
+-     * Set to add randomness to the base packet size.
+-     *
+-     * On each call to SendPacket(), an integer number is picked from a random variable. That
+-     * integer number is then added to the base packet size to create the new packet.
+-     *
+-     * \param rv The random variable used to extract the additional number of packet bytes.
+-     * Extracted values can be negative, but if they are lower than the base packet size they
+-     * produce a runtime error. This check is left to the caller during definition of the random
+-     * variable.
+-     */
+-    void SetPacketSizeRandomVariable(Ptr<RandomVariableStream> rv);
+-
+-    /**
+-     * Send a packet using the LoraNetDevice's Send method.
+-     */
+-    void SendPacket();
+-
+-    /**
+-     * Start the application by scheduling the first SendPacket event.
++     * Start the application by scheduling the first SendPacket event
+      */
+     void StartApplication() override;
+ 
+     /**
+-     * Stop the application.
++     * Send a packet using the LoraNetDevice's Send method
+      */
+-    void StopApplication() override;
+-
+-  private:
+-    Time m_interval;       //!< The interval between to consecutive send events.
+-    Time m_initialDelay;   //!< The initial delay of this application.
+-    EventId m_sendEvent;   //!< The sending event scheduled as next.
+-    Ptr<LorawanMac> m_mac; //!< The MAC layer of this node.
+-    uint8_t m_basePktSize; //!< The packet size.
+-    Ptr<RandomVariableStream>
+-        m_pktSizeRV; //!< The random variable that adds bytes to the packet size.
++    void SendPacket() override;
+ };
+ 
+ } // namespace lorawan
+diff --git a/model/random-listener.cc b/model/random-listener.cc
+new file mode 100644
+index 0000000..e762d43
+--- /dev/null
++++ b/model/random-listener.cc
+@@ -0,0 +1,137 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "random-listener.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++NS_LOG_COMPONENT_DEFINE("RandomListener");
++
++NS_OBJECT_ENSURE_REGISTERED(RandomListener);
++
++TypeId
++RandomListener::GetTypeId()
++{
++    static TypeId tid = TypeId("ns3::RandomListener")
++                            .SetParent<Application>()
++                            .AddConstructor<RandomListener>()
++                            .SetGroupName("lorawan")
++                            .AddAttribute("MaxInterval",
++                                          "Maximum time before switching to next random Rx channel",
++                                          TimeValue(Minutes(10)),
++                                          MakeTimeAccessor(&RandomListener::m_maxInterval),
++                                          MakeTimeChecker(Seconds(1)));
++    return tid;
++}
++
++RandomListener::RandomListener()
++{
++    NS_LOG_FUNCTION(this);
++}
++
++RandomListener::~RandomListener()
++{
++    NS_LOG_FUNCTION(this);
++}
++
++void
++RandomListener::DoInitialize()
++{
++    NS_LOG_FUNCTION(this);
++    // Automatically retrieve first LoraGatewayNetDevice installed on this node
++    uint32_t i = 0;
++    for (; i < m_node->GetNDevices() && !m_dev; ++i)
++    {
++        m_dev = DynamicCast<LoraGatewayNetDevice>(m_node->GetDevice(i));
++    }
++    NS_ABORT_MSG_UNLESS(m_dev, "No LoraGatewayNetDevice found on this node");
++    for (; i < m_node->GetNDevices(); ++i)
++    {
++        if (DynamicCast<LoraGatewayNetDevice>(m_node->GetDevice(i)))
++        {
++            NS_LOG_WARN("Multiple LoraGatewayNetDevice found on this node, using first");
++            break;
++        }
++    }
++    // Retrieve SimpleEndDeviceLoraPhy from net device
++    m_phy = DynamicCast<SimpleEndDeviceLoraPhy>(m_dev->GetPhy());
++    NS_ABORT_MSG_UNLESS(m_phy,
++                        "No SimpleEndDeviceLoraPhy found on this node's LoraGatewayNetDevice");
++    // Init random variable
++    m_rv =
++        CreateObjectWithAttributes<UniformRandomVariable>("Min",
++                                                          DoubleValue(1),
++                                                          "Max",
++                                                          DoubleValue(m_maxInterval.GetSeconds()));
++    Application::DoInitialize();
++}
++
++void
++RandomListener::DoDispose()
++{
++    NS_LOG_FUNCTION(this);
++    m_dev = nullptr;
++    m_phy = nullptr;
++    m_rv = nullptr;
++    Application::DoDispose();
++}
++
++void
++RandomListener::StartApplication()
++{
++    NS_LOG_FUNCTION(this);
++    m_switchEvent.Cancel();
++    // Schedule the first switching event
++    auto delay = Seconds(m_rv->GetValue());
++    m_switchEvent = Simulator::Schedule(delay, &RandomListener::SwitchRxChannel, this);
++    NS_LOG_DEBUG("First switch in " << delay.GetSeconds() << ", id: " << m_switchEvent.GetUid());
++}
++
++void
++RandomListener::StopApplication()
++{
++    NS_LOG_FUNCTION(this);
++    m_switchEvent.Cancel();
++}
++
++void
++RandomListener::SwitchRxChannel()
++{
++    NS_LOG_FUNCTION(this);
++    auto& freqs = CluesNetDevice::m_frequenciesMHz;
++    size_t freqIdx = m_rv->GetInteger(0, freqs.size() - 1);
++    auto freq = freqs.at(freqIdx);
++    m_phy->SetFrequency(freq);
++    NS_LOG_DEBUG("Rx frequency set to " << freq);
++    auto& sfs = CluesNetDevice::m_spreadingFactors;
++    size_t sfIdx = m_rv->GetInteger(0, sfs.size() - 1);
++    auto sf = sfs.at(sfIdx);
++    m_phy->SetSpreadingFactor(sf);
++    // Schedule next switching event
++    auto delay = Seconds(m_rv->GetValue());
++    m_switchEvent = Simulator::Schedule(delay, &RandomListener::SwitchRxChannel, this);
++    NS_LOG_DEBUG("Next freq switch in " << delay.GetSeconds()
++                                        << ", id: " << m_switchEvent.GetUid());
++}
++
++} // namespace lorawan
++} // namespace ns3
+\ No newline at end of file
+diff --git a/model/random-listener.h b/model/random-listener.h
+new file mode 100644
+index 0000000..bd0b06b
+--- /dev/null
++++ b/model/random-listener.h
+@@ -0,0 +1,84 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#ifndef RANDOM_LISTENER_H
++#define RANDOM_LISTENER_H
++
++#include "ns3/application.h"
++#include "ns3/attribute.h"
++#include "ns3/lora-gateway-net-device.h"
++#include "ns3/nstime.h"
++#include "ns3/simple-end-device-lora-phy.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++/**
++ * \ingroup lorawan
++ *
++ * This application randomly switches reception channel over time.
++ * It's intended for single-channel LoRa gateways
++ */
++class RandomListener : public Application
++{
++  public:
++    RandomListener();           //!< Default constructor
++    ~RandomListener() override; //!< Destructor
++
++    /**
++     *  Register this type.
++     *  \return The object TypeId.
++     */
++    static TypeId GetTypeId();
++
++  protected:
++    void DoInitialize() override;
++    void DoDispose() override;
++
++  private:
++    /**
++     * Start the application.
++     */
++    void StartApplication() override;
++
++    /**
++     * Stop the application.
++     */
++    void StopApplication() override;
++
++    /**
++     * Switches Rx channel to a random one found in the net device
++     */
++    void SwitchRxChannel();
++
++    Ptr<LoraGatewayNetDevice> m_dev;   //!< Pointer to the node's LoraGatewayNetDevice
++    Ptr<SimpleEndDeviceLoraPhy> m_phy; //!< Pointer to the node's SimpleEndDeviceLoraPhy
++
++    Ptr<UniformRandomVariable>
++        m_rv;              //!< Random variable to select next rx channel and time interval
++    Time m_maxInterval;    //!< Maximum switching delay
++    EventId m_switchEvent; //!< The next scheduled switching event
++};
++
++} // namespace lorawan
++} // namespace ns3
++
++#endif /* RANDOM_LISTENER */
+diff --git a/model/sensor-net-device.cc b/model/sensor-net-device.cc
+new file mode 100644
+index 0000000..6f7f7a6
+--- /dev/null
++++ b/model/sensor-net-device.cc
+@@ -0,0 +1,136 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#include "sensor-net-device.h"
++
++#include "ns3/clues-header.h"
++#include "ns3/simple-end-device-lora-phy.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++NS_LOG_COMPONENT_DEFINE("SensorNetDevice");
++
++NS_OBJECT_ENSURE_REGISTERED(SensorNetDevice);
++
++TypeId
++SensorNetDevice::GetTypeId()
++{
++    static TypeId tid = TypeId("ns3::SensorNetDevice")
++                            .SetParent<CluesNetDevice>()
++                            .AddConstructor<SensorNetDevice>()
++                            .SetGroupName("lorawan");
++    return tid;
++}
++
++SensorNetDevice::SensorNetDevice()
++    : m_fCnt(0),
++      m_sf(12),
++      m_txPower(14),
++      m_freqs(m_frequenciesMHz)
++{
++    NS_LOG_FUNCTION(this);
++    m_rand = CreateObject<UniformRandomVariable>();
++}
++
++SensorNetDevice::~SensorNetDevice()
++{
++    NS_LOG_FUNCTION(this);
++}
++
++void
++SensorNetDevice::Send(Ptr<Packet> packet)
++{
++    NS_LOG_FUNCTION(this << packet);
++    // header 12 bytes
++    CluesHeader hdr;
++    hdr.SetAddress(GetNode()->GetId());
++    hdr.SetFCnt(m_fCnt++);
++    NS_LOG_DEBUG("Header: " << hdr);
++    packet->AddHeader(hdr);
++    // Set TX parameters
++    LoraTxParameters params;
++    size_t freqIdx = m_rand->GetInteger(0, m_freqs.size() - 1);
++    double freq = m_freqs.at(freqIdx);
++    params.sf = m_sf;
++    double txPow = m_txPower;
++    // Use low data optim. for SF11 & SF12
++    params.lowDataRateOptimizationEnabled = (params.sf == 11 || params.sf == 12);
++    // Transmit packet
++    m_phy->Send(packet, params, freq, txPow);
++}
++
++void
++SensorNetDevice::TxFinished(Ptr<const Packet> packet)
++{
++    NS_LOG_FUNCTION(this << packet);
++    DynamicCast<EndDeviceLoraPhy>(m_phy)->SwitchToSleep();
++    //!< TODO: Init RX process for end devices?
++}
++
++void
++SensorNetDevice::SetSpreadingFactor(uint8_t sf)
++{
++    NS_ASSERT(sf >= 7 && sf <= 12);
++    m_sf = sf;
++}
++
++uint8_t
++SensorNetDevice::GetSpreadingFactor() const
++{
++    return m_sf;
++}
++
++void
++SensorNetDevice::SetTxPower(uint8_t txPowerDbm)
++{
++    NS_ASSERT(txPowerDbm >= 0 && txPowerDbm <= 14);
++    m_txPower = txPowerDbm;
++}
++
++uint8_t
++SensorNetDevice::GetTxPower() const
++{
++    return m_txPower;
++}
++
++void
++SensorNetDevice::SetFrequencies(std::vector<double> freqsMHz)
++{
++    m_freqs = freqsMHz;
++}
++
++std::vector<double>
++SensorNetDevice::GetFrequencies() const
++{
++    return m_freqs;
++}
++
++void
++SensorNetDevice::DoInitialize()
++{
++    NS_LOG_FUNCTION(this);
++    NS_ASSERT(m_phy && DynamicCast<SimpleEndDeviceLoraPhy>(m_phy));
++    CluesNetDevice::DoInitialize();
++}
++
++} // namespace lorawan
++} // namespace ns3
+diff --git a/model/sensor-net-device.h b/model/sensor-net-device.h
+new file mode 100644
+index 0000000..ae08da6
+--- /dev/null
++++ b/model/sensor-net-device.h
+@@ -0,0 +1,119 @@
++/*
++ * Copyright (c) 2024 University of Bologna
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Alessandro Aimi <alessandro.aimi@unibo.it>
++ */
++
++#ifndef SENSOR_NET_DEVICE_H
++#define SENSOR_NET_DEVICE_H
++
++#include "ns3/clues-net-device.h"
++
++namespace ns3
++{
++namespace lorawan
++{
++
++/**
++ * \ingroup lorawan
++ *
++ * Manages PHY layer of CLUES Sensor devices.
++ */
++class SensorNetDevice : public CluesNetDevice
++{
++  public:
++    /**
++     *  Register this type.
++     *  \return The object TypeId.
++     */
++    static TypeId GetTypeId();
++
++    SensorNetDevice();           //!< Default constructor
++    ~SensorNetDevice() override; //!< Destructor
++
++    /**
++     * Send a packet through the LoRa PHY layer.
++     *
++     * \param packet The packet to send.
++     */
++    void Send(Ptr<Packet> packet) override;
++
++    /**
++     * Callback used by the PHY layer to signal a TX end.
++     *
++     * \param packet The packet transmitted.
++     */
++    void TxFinished(Ptr<const Packet> packet) override;
++
++    /**
++     * Set the default spreading factor to be used for transmissions.
++     *
++     * \param sf The spreading factor value (7-12).
++     */
++    void SetSpreadingFactor(uint8_t sf);
++
++    /**
++     * Get the default spreading factor used for transmissions.
++     *
++     * \return The spreading factor being currently used (7-12).
++     */
++    uint8_t GetSpreadingFactor() const;
++
++    /**
++     * Set the default power to be used for transmissions.
++     *
++     * \param txPowerDbm The transmission power [dBm].
++     */
++    void SetTxPower(uint8_t txPowerDbm);
++
++    /**
++     * Get the default power used for transmissions.
++     *
++     * \return The transmission power being currently used [dBm].
++     */
++    uint8_t GetTxPower() const;
++
++    /**
++     * Set the vector of frequencies to be used for transmissions.
++     *
++     * For each new transmission, one frequency is picked at random.
++     *
++     * \param freqsMHz Vector of frequencies [MHz].
++     */
++    void SetFrequencies(std::vector<double> freqsMHz);
++
++    /**
++     * Get the vector of frequencies that are used for transmission.
++     *
++     * \return Vector of frequencies [MHz].
++     */
++    std::vector<double> GetFrequencies() const;
++
++  protected:
++    void DoInitialize() override;
++
++  private:
++    Ptr<UniformRandomVariable> m_rand;
++    uint32_t m_fCnt;
++    uint8_t m_sf;
++    uint8_t m_txPower;
++    std::vector<double> m_freqs;
++};
++
++} // namespace lorawan
++} // namespace ns3
++
++#endif /* SENSOR_NET_DEVICE_H */
+diff --git a/model/simple-end-device-lora-phy.cc b/model/simple-end-device-lora-phy.cc
+index cc2d7f8..6a11595 100644
+--- a/model/simple-end-device-lora-phy.cc
++++ b/model/simple-end-device-lora-phy.cc
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "simple-end-device-lora-phy.h"
+@@ -136,6 +137,77 @@ SimpleEndDeviceLoraPhy::StartReceive(Ptr<Packet> packet,
+     Ptr<LoraInterferenceHelper::Event> event;
+     event = m_interference.Add(duration, rxPowerDbm, sf, packet, frequencyMHz);
+ 
++    // Save needed sensitivity
++    double sensitivity = EndDeviceLoraPhy::sensitivity[unsigned(sf) - 7];
++
++    // There are a series of properties the packet needs to respect in order
++    // for us to be able to lock on it:
++    // - Its receive power is above the device sensitivity for that spreading factor
++    // - It's on frequency we are listening on
++    // - It uses the spreading factor we are configured to look for
++    // Finally, we must be ready to receive (here considered STANDBY mode).
++
++    // Check Sensitivity
++    ////////////////////
++    if (rxPowerDbm < sensitivity)
++    {
++        NS_LOG_INFO("Dropping packet reception of packet with sf = "
++                    << unsigned(sf) << " because under the sensitivity of " << sensitivity
++                    << " dBm");
++
++        // Fire the trace source for this event.
++        if (m_device)
++        {
++            m_underSensitivity(packet, m_device->GetNode()->GetId());
++        }
++        else
++        {
++            m_underSensitivity(packet, 0);
++        }
++
++        return;
++    }
++
++    // Check frequency
++    //////////////////
++    if (!IsOnFrequency(frequencyMHz))
++    {
++        NS_LOG_INFO("Packet lost because it's on frequency "
++                    << frequencyMHz << " MHz and we are listening at " << m_frequency << " MHz");
++
++        // Fire the trace source for this event.
++        if (m_device)
++        {
++            m_wrongFrequency(packet, m_device->GetNode()->GetId());
++        }
++        else
++        {
++            m_wrongFrequency(packet, 0);
++        }
++
++        return;
++    }
++
++    // Check Spreading Factor
++    /////////////////////////
++    if (sf != m_sf)
++    {
++        NS_LOG_INFO("Packet lost because it's using SF"
++                    << unsigned(sf) << ", while we are listening for SF" << unsigned(m_sf));
++
++        // Fire the trace source for this event.
++        if (m_device)
++        {
++            m_wrongSf(packet, m_device->GetNode()->GetId());
++        }
++        else
++        {
++            m_wrongSf(packet, 0);
++        }
++
++        return;
++    }
++
+     // Switch on the current PHY state
+     switch (m_state)
+     {
+@@ -148,106 +220,45 @@ SimpleEndDeviceLoraPhy::StartReceive(Ptr<Packet> packet,
+     }
+     case TX: {
+         NS_LOG_INFO("Dropping packet because device is in TX state");
++        // Fire the trace source
++        if (m_device)
++        {
++            m_noReceptionBecauseTransmitting(packet, m_device->GetNode()->GetId());
++        }
++        else
++        {
++            m_noReceptionBecauseTransmitting(packet, 0);
++        }
+         break;
+     }
+     case RX: {
+         NS_LOG_INFO("Dropping packet because device is already in RX state");
++        // Fire the trace source
++        if (m_device)
++        {
++            m_noMoreDemodulators(packet, m_device->GetNode()->GetId());
++        }
++        else
++        {
++            m_noMoreDemodulators(packet, 0);
++        }
+         break;
+     }
+     // If we are in STANDBY mode, we can potentially lock on the currently
+     // incoming transmission
+     case STANDBY: {
+-        // There are a series of properties the packet needs to respect in order
+-        // for us to be able to lock on it:
+-        // - It's on frequency we are listening on
+-        // - It uses the spreading factor we are configured to look for
+-        // - Its receive power is above the device sensitivity for that spreading factor
+-
+-        // Flag to signal whether we can receive the packet or not
+-        bool canLockOnPacket = true;
+-
+-        // Save needed sensitivity
+-        double sensitivity = EndDeviceLoraPhy::sensitivity[unsigned(sf) - 7];
+-
+-        // Check frequency
+-        //////////////////
+-        if (!IsOnFrequency(frequencyMHz))
+-        {
+-            NS_LOG_INFO("Packet lost because it's on frequency "
+-                        << frequencyMHz << " MHz and we are listening at " << m_frequency
+-                        << " MHz");
+-
+-            // Fire the trace source for this event.
+-            if (m_device)
+-            {
+-                m_wrongFrequency(packet, m_device->GetNode()->GetId());
+-            }
+-            else
+-            {
+-                m_wrongFrequency(packet, 0);
+-            }
+-
+-            canLockOnPacket = false;
+-        }
+-
+-        // Check Spreading Factor
+-        /////////////////////////
+-        if (sf != m_sf)
+-        {
+-            NS_LOG_INFO("Packet lost because it's using SF"
+-                        << unsigned(sf) << ", while we are listening for SF" << unsigned(m_sf));
+-
+-            // Fire the trace source for this event.
+-            if (m_device)
+-            {
+-                m_wrongSf(packet, m_device->GetNode()->GetId());
+-            }
+-            else
+-            {
+-                m_wrongSf(packet, 0);
+-            }
+-
+-            canLockOnPacket = false;
+-        }
+-
+-        // Check Sensitivity
+-        ////////////////////
+-        if (rxPowerDbm < sensitivity)
+-        {
+-            NS_LOG_INFO("Dropping packet reception of packet with sf = "
+-                        << unsigned(sf) << " because under the sensitivity of " << sensitivity
+-                        << " dBm");
+-
+-            // Fire the trace source for this event.
+-            if (m_device)
+-            {
+-                m_underSensitivity(packet, m_device->GetNode()->GetId());
+-            }
+-            else
+-            {
+-                m_underSensitivity(packet, 0);
+-            }
+-
+-            canLockOnPacket = false;
+-        }
+-
+-        // Check if one of the above failed
+-        ///////////////////////////////////
+-        if (canLockOnPacket)
+-        {
+-            // Switch to RX state
+-            // EndReceive will handle the switch back to STANDBY state
+-            SwitchToRx();
++        // Switch to RX state
++        // EndReceive will handle the switch back to STANDBY state
++        SwitchToRx();
+ 
+-            // Schedule the end of the reception of the packet
+-            NS_LOG_INFO("Scheduling reception of a packet. End in " << duration.GetSeconds()
+-                                                                    << " seconds");
++        // Schedule the end of the reception of the packet
++        NS_LOG_INFO("Scheduling reception of a packet. End in " << duration.GetSeconds()
++                                                                << " seconds");
+ 
+-            Simulator::Schedule(duration, &LoraPhy::EndReceive, this, packet, event);
++        Simulator::Schedule(duration, &LoraPhy::EndReceive, this, packet, event);
+ 
+-            // Fire the beginning of reception trace source
+-            m_phyRxBeginTrace(packet);
+-        }
++        // Fire the beginning of reception trace source
++        m_phyRxBeginTrace(packet);
+     }
+     }
+ }
+diff --git a/model/simple-gateway-lora-phy.cc b/model/simple-gateway-lora-phy.cc
+index e861806..be829e2 100644
+--- a/model/simple-gateway-lora-phy.cc
++++ b/model/simple-gateway-lora-phy.cc
+@@ -15,6 +15,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+  * Author: Davide Magrin <magrinda@dei.unipd.it>
++ * Modified by: Alessandro Aimi <alessandro.aimi@unibo.it>
+  */
+ 
+ #include "simple-gateway-lora-phy.h"
+@@ -127,8 +128,33 @@ SimpleGatewayLoraPhy::StartReceive(Ptr<Packet> packet,
+ {
+     NS_LOG_FUNCTION(this << packet << rxPowerDbm << duration << frequencyMHz);
+ 
+-    // Fire the trace source
+-    m_phyRxBeginTrace(packet);
++    // Add the event to the LoraInterferenceHelper
++    Ptr<LoraInterferenceHelper::Event> event;
++    event = m_interference.Add(duration, rxPowerDbm, sf, packet, frequencyMHz);
++
++    // See whether the reception power is above or below the sensitivity
++    // for that spreading factor
++    double sensitivity = SimpleGatewayLoraPhy::sensitivity[unsigned(sf) - 7];
++
++    if (rxPowerDbm < sensitivity) // Packet arrived below sensitivity
++    {
++        NS_LOG_INFO("Dropping packet reception of packet with sf = "
++                    << unsigned(sf) << " because under the sensitivity of " << sensitivity
++                    << " dBm");
++
++        if (m_device)
++        {
++            m_underSensitivity(packet, m_device->GetNode()->GetId());
++        }
++        else
++        {
++            m_underSensitivity(packet, 0);
++        }
++
++        // Since the packet is below sensitivity, it makes no sense to
++        // search for another ReceivePath
++        return;
++    }
+ 
+     if (m_isTransmitting)
+     {
+@@ -136,8 +162,6 @@ SimpleGatewayLoraPhy::StartReceive(Ptr<Packet> packet,
+         NS_LOG_INFO("Dropping packet reception of packet with sf = "
+                     << unsigned(sf) << " because we are in TX mode");
+ 
+-        m_phyRxEndTrace(packet);
+-
+         // Fire the trace source
+         if (m_device)
+         {
+@@ -151,62 +175,32 @@ SimpleGatewayLoraPhy::StartReceive(Ptr<Packet> packet,
+         return;
+     }
+ 
+-    // Add the event to the LoraInterferenceHelper
+-    Ptr<LoraInterferenceHelper::Event> event;
+-    event = m_interference.Add(duration, rxPowerDbm, sf, packet, frequencyMHz);
+-
+     // Cycle over the receive paths to check availability to receive the packet
+-    std::list<Ptr<SimpleGatewayLoraPhy::ReceptionPath>>::iterator it;
+-
+-    for (it = m_receptionPaths.begin(); it != m_receptionPaths.end(); ++it)
++    for (auto it = m_receptionPaths.begin(); it != m_receptionPaths.end(); ++it)
+     {
+-        Ptr<SimpleGatewayLoraPhy::ReceptionPath> currentPath = *it;
++        auto currentPath = *it;
+ 
+         // If the receive path is available and listening on the channel of
+         // interest, we have a candidate
+         if (currentPath->IsAvailable())
+         {
+-            // See whether the reception power is above or below the sensitivity
+-            // for that spreading factor
+-            double sensitivity = SimpleGatewayLoraPhy::sensitivity[unsigned(sf) - 7];
++            NS_LOG_INFO("Scheduling reception of a packet, " << "occupying one demodulator");
+ 
+-            if (rxPowerDbm < sensitivity) // Packet arrived below sensitivity
+-            {
+-                NS_LOG_INFO("Dropping packet reception of packet with sf = "
+-                            << unsigned(sf) << " because under the sensitivity of " << sensitivity
+-                            << " dBm");
+-
+-                if (m_device)
+-                {
+-                    m_underSensitivity(packet, m_device->GetNode()->GetId());
+-                }
+-                else
+-                {
+-                    m_underSensitivity(packet, 0);
+-                }
+-
+-                // Since the packet is below sensitivity, it makes no sense to
+-                // search for another ReceivePath
+-                return;
+-            }
+-            else // We have sufficient sensitivity to start receiving
+-            {
+-                NS_LOG_INFO("Scheduling reception of a packet, "
+-                            << "occupying one demodulator");
++            // Block this resource
++            currentPath->LockOnEvent(event);
++            m_occupiedReceptionPaths++;
+ 
+-                // Block this resource
+-                currentPath->LockOnEvent(event);
+-                m_occupiedReceptionPaths++;
++            // Schedule the end of the reception of the packet
++            EventId endReceiveEventId =
++                Simulator::Schedule(duration, &LoraPhy::EndReceive, this, packet, event);
+ 
+-                // Schedule the end of the reception of the packet
+-                EventId endReceiveEventId =
+-                    Simulator::Schedule(duration, &LoraPhy::EndReceive, this, packet, event);
++            currentPath->SetEndReceive(endReceiveEventId);
+ 
+-                currentPath->SetEndReceive(endReceiveEventId);
++            // Fire the trace source
++            m_phyRxBeginTrace(packet);
+ 
+-                // Make sure we don't go on searching for other ReceivePaths
+-                return;
+-            }
++            // Make sure we don't go on searching for other ReceivePaths
++            return;
+         }
+     }
+     // If we get to this point, there are no demodulators we can use
+-- 
+2.34.1
+

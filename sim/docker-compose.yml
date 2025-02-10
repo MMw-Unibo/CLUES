@@ -1,0 +1,9 @@
+services:
+  clues:
+    image: nondetalle/sim-clues:0.1.0
+    build: ./build
+    tty: true
+    volumes: [./experiments:/home/jovyan/work]
+    ports: [8888:8888]
+    user: ${DOCKER_USER:?Plese run 'echo "DOCKER_USER=$(id -u):$(id -g)" > .env'}
+    group_add: [users]

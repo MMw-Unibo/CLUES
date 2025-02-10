@@ -1,0 +1,11 @@
+This repository contains multiple components with different licenses:
+
+1. The code in `sim/` is a derivative of GPL v2 software and is licensed under the **GNU General Public License v2 (GPL-2.0-only)**.
+   See `sim/LICENSE` for details.
+
+2. The code in `code/` is licensed under the **Apache License, Version 2.0**.
+   See `code/LICENSE` for details.
+
+These components are independent and do not interact directly.
+
+For full license terms, refer to the respective `LICENSE` files in each directory.

@@ -1,0 +1,3 @@
+[workspace]
+members = ["lora", "msg", "phy_dev", "smart_gw", "virt_dev"]
+resolver = "2"

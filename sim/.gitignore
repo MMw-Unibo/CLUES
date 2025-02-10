@@ -1,0 +1,6 @@
+experiments/*/*
+!experiments/*/*.ipynb
+
+.env
+
+ns-3-dev/
